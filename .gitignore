@@ -2,6 +2,7 @@
 Backend/.git
 Backend/.env
 Backend/venv/
+Frontend/node_modules/
 __pycache__/
 *.pyc
 *.pyo
