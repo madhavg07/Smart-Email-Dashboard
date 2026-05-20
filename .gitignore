@@ -1,0 +1,8 @@
+﻿.venv/
+Backend/.git
+Backend/.env
+Backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
