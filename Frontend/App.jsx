@@ -502,16 +502,14 @@ function ComposePage({ showToast, onRefresh }) {
     }
     setSaving(true);
     try {
-      // 1. Pack the variables into URL Query Parameters cleanly
-      const queryParams = new URLSearchParams({
-        name: form.name,
-        subject: form.subject,
-        body_html: form.body_html
-      }).toString();
-
-      // 2. Attach them directly to the URL with a "?" and remove the JSON body
-      await api(`/campaigns/?${queryParams}`, {
+      // We are back to safely sending JSON!
+      await api("/campaigns/", {
         method: "POST",
+        body: JSON.stringify({ 
+          name: form.name, 
+          subject: form.subject, 
+          body_html: form.body_html
+        }),
       });
 
       showToast("Campaign saved as draft!");
