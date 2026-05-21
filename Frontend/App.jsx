@@ -496,28 +496,28 @@ function ComposePage({ showToast, onRefresh }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleSave = async () => {
+ const handleSave = async () => {
     if (!form.name || !form.subject || !form.body_html) {
       showToast("Fill in name, subject, and body", "error"); return;
     }
     setSaving(true);
     try {
-      await api("/campaigns/", {
+      // 1. Pack the variables into URL Query Parameters cleanly
+      const queryParams = new URLSearchParams({
+        name: form.name,
+        subject: form.subject,
+        body_html: form.body_html
+      }).toString();
+
+      // 2. Attach them directly to the URL with a "?" and remove the JSON body
+      await api(`/campaigns/?${queryParams}`, {
         method: "POST",
-        body: JSON.stringify({ 
-          name: form.name, 
-          subject: form.subject, 
-          body_html: form.body_html,
-          // Let's also pass these in case your backend requires them!
-          personalize: form.personalize,
-          ab_test: form.ab_test
-        }),
       });
+
       showToast("Campaign saved as draft!");
       onRefresh();
       setForm({ name: "", subject: "", body_html: "", personalize: true, ab_test: false });
     } catch (e) {
-      // THIS will now display FastAPI's exact error message on your screen!
       showToast(`Error: ${e.message}`, "error");
     } finally {
       setSaving(false);
