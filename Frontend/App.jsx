@@ -162,14 +162,19 @@ export default function MailPulse() {
     setLoading(true);
     try {
       const [ov, cmp, rcp, tl] = await Promise.all([
-        api("/analytics/overview"),
-        api("/campaigns/"),
-        api("/recipients/"),
-        api("/analytics/opens-over-time"),
+        api("/analytics/overview").catch(() => ({})),
+        api("/campaigns/").catch(() => []),
+        api("/recipients/").catch(() => []),
+        api("/analytics/opens-over-time").catch(() => []),
       ]);
-      setOverview(ov); setCampaigns(cmp); setRecipients(rcp); setTimeline(tl);
-    } catch {
       
+      // Enforce data types aggressively so React maps and string functions never crash
+      setOverview(ov || {});
+      setCampaigns(Array.isArray(cmp) ? cmp : (cmp?.campaigns || []));
+      setRecipients(Array.isArray(rcp) ? rcp : (rcp?.recipients || []));
+      setTimeline(Array.isArray(tl) ? tl : (tl?.timeline || []));
+    } catch (e) {
+      console.error("Data load issue:", e);
     } finally {
       setLoading(false);
     }
@@ -238,25 +243,28 @@ export default function MailPulse() {
 }
 
 function DashboardPage({ overview, timeline, pieData, campaigns }) {
+  // Ensure we safely fall back if the backend object is completely empty
+  const safeCampaigns = campaigns || [];
+
   return (
     <div>
       <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 6, color: "#f9fafb" }}>Overview</h1>
       <p style={{ color: "#6b7280", marginBottom: 24, fontSize: 14 }}>Real-time campaign performance & engagement intelligence</p>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
-        <StatCard label="Total Sent" value={overview?.total_emails_sent?.toLocaleString() || "0"} sub="all time" accent="#60a5fa" />
-        <StatCard label="Avg Open Rate" value={pct(overview.avg_open_rate)} sub={`${overview.total_opens.toLocaleString()} opens`} accent="#22c55e" />
-        <StatCard label="Avg Click Rate" value={pct(overview.avg_click_rate)} sub={`${overview.total_clicks.toLocaleString()} clicks`} accent="#a78bfa" />
-        <StatCard label="Suppressed" value={overview.suppressed_recipients} sub="auto-filtered" accent="#f87171" />
+        <StatCard label="Total Sent" value={(overview?.total_emails_sent || 0).toLocaleString()} sub="all time" accent="#60a5fa" />
+        <StatCard label="Avg Open Rate" value={pct(overview?.avg_open_rate || 0)} sub={`${(overview?.total_opens || 0).toLocaleString()} opens`} accent="#22c55e" />
+        <StatCard label="Avg Click Rate" value={pct(overview?.avg_click_rate || 0)} sub={`${(overview?.total_clicks || 0).toLocaleString()} clicks`} accent="#a78bfa" />
+        <StatCard label="Suppressed" value={overview?.suppressed_recipients || 0} sub="auto-filtered" accent="#f87171" />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 24 }}>
         <div style={{ background: "#111827", borderRadius: 12, padding: 20, border: "1px solid #1f2937" }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#d1d5db", marginBottom: 16 }}>Opens Over Time</div>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={timeline}>
+            <LineChart data={timeline || []}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+              <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 11 }} tickFormatter={d => d?.slice(5) || d} />
               <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} />
               <Tooltip contentStyle={{ background: "#1f2937", border: "none", borderRadius: 8, color: "#f9fafb" }} />
               <Line type="monotone" dataKey="opens" stroke="#60a5fa" strokeWidth={2} dot={false} />
@@ -289,15 +297,15 @@ function DashboardPage({ overview, timeline, pieData, campaigns }) {
             </tr>
           </thead>
           <tbody>
-            {campaigns.slice(0, 4).map(c => (
+            {safeCampaigns.slice(0, 4).map(c => (
               <tr key={c.id} style={{ borderBottom: "1px solid #0f172a" }}>
                 <td style={{ padding: "10px 12px", color: "#e5e7eb", fontWeight: 500 }}>{c.name}</td>
                 <td style={{ padding: "10px 12px" }}><Badge status={c.status} /></td>
-                <td style={{ padding: "10px 12px", color: "#9ca3af" }}>{c.total_sent.toLocaleString()}</td>
+                <td style={{ padding: "10px 12px", color: "#9ca3af" }}>{(c.total_sent || 0).toLocaleString()}</td>
                 <td style={{ padding: "10px 12px" }}>
-                  <span style={{ color: c.open_rate > 30 ? "#22c55e" : "#f59e0b" }}>{pct(c.open_rate)}</span>
+                  <span style={{ color: c.open_rate > 30 ? "#22c55e" : "#f59e0b" }}>{pct(c.open_rate || 0)}</span>
                 </td>
-                <td style={{ padding: "10px 12px", color: "#9ca3af" }}>{pct(c.click_rate)}</td>
+                <td style={{ padding: "10px 12px", color: "#9ca3af" }}>{pct(c.click_rate || 0)}</td>
               </tr>
             ))}
           </tbody>
@@ -308,6 +316,8 @@ function DashboardPage({ overview, timeline, pieData, campaigns }) {
 }
 
 function CampaignsPage({ campaigns, onRefresh, showToast }) {
+  const safeCampaigns = campaigns || [];
+
   const handleSend = async (id) => {
     try {
       await api(`/campaigns/${id}/send?personalize=true&ab_test=false`, { method: "POST" });
@@ -323,12 +333,12 @@ function CampaignsPage({ campaigns, onRefresh, showToast }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>Campaigns</h1>
-          <p style={{ color: "#6b7280", fontSize: 14, margin: "4px 0 0" }}>{campaigns.length} campaigns total</p>
+          <p style={{ color: "#6b7280", fontSize: 14, margin: "4px 0 0" }}>{safeCampaigns.length} campaigns total</p>
         </div>
       </div>
 
       <div style={{ display: "grid", gap: 12 }}>
-        {campaigns.map(c => (
+        {safeCampaigns.map(c => (
           <div key={c.id} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", gap: 20 }}>
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
@@ -340,9 +350,9 @@ function CampaignsPage({ campaigns, onRefresh, showToast }) {
 
             <div style={{ display: "flex", gap: 28, fontSize: 13 }}>
               {[
-                { label: "Sent", val: c.total_sent.toLocaleString() },
-                { label: "Opens", val: pct(c.open_rate), color: c.open_rate > 30 ? "#22c55e" : "#f59e0b" },
-                { label: "Clicks", val: pct(c.click_rate), color: "#a78bfa" },
+                { label: "Sent", val: (c.total_sent || 0).toLocaleString() },
+                { label: "Opens", val: pct(c.open_rate || 0), color: (c.open_rate || 0) > 30 ? "#22c55e" : "#f59e0b" },
+                { label: "Clicks", val: pct(c.click_rate || 0), color: "#a78bfa" },
               ].map(s => (
                 <div key={s.label} style={{ textAlign: "center" }}>
                   <div style={{ color: s.color || "#9ca3af", fontWeight: 700, fontSize: 16 }}>{s.val}</div>
@@ -371,11 +381,13 @@ function RecipientsPage({ recipients, onRefresh, showToast }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
 
-  const filtered = recipients.filter(r => {
+  const safeRecipients = recipients || [];
+
+  const filtered = safeRecipients.filter(r => {
     if (filter === "suppressed" && !r.is_suppressed) return false;
-    if (filter === "hot" && r.seriousness_score < 0.75) return false;
+    if (filter === "hot" && (r.seriousness_score || 0) < 0.75) return false;
     if (filter === "active" && r.is_suppressed) return false;
-    if (search && !r.email.includes(search) && !(r.name || "").toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !(r.email || "").includes(search) && !(r.name || "").toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
@@ -394,7 +406,7 @@ function RecipientsPage({ recipients, onRefresh, showToast }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>Recipients</h1>
-          <p style={{ color: "#6b7280", fontSize: 14, margin: "4px 0 0" }}>{recipients.length} total · ML engagement scoring active</p>
+          <p style={{ color: "#6b7280", fontSize: 14, margin: "4px 0 0" }}>{safeRecipients.length} total · ML engagement scoring active</p>
         </div>
       </div>
 
@@ -448,15 +460,15 @@ function RecipientsPage({ recipients, onRefresh, showToast }) {
                     <div style={{
                       width: 80, height: 6, background: "#1f2937", borderRadius: 3, overflow: "hidden"
                     }}>
-                      <div style={{ width: `${r.seriousness_score * 100}%`, height: "100%", background: scoreColor(r.seriousness_score), borderRadius: 3 }} />
+                      <div style={{ width: `${(r.seriousness_score || 0) * 100}%`, height: "100%", background: scoreColor(r.seriousness_score || 0), borderRadius: 3 }} />
                     </div>
-                    <span style={{ color: scoreColor(r.seriousness_score), fontSize: 12, fontWeight: 600 }}>
-                      {scoreLabel(r.seriousness_score)}
+                    <span style={{ color: scoreColor(r.seriousness_score || 0), fontSize: 12, fontWeight: 600 }}>
+                      {scoreLabel(r.seriousness_score || 0)}
                     </span>
                   </div>
                 </td>
-                <td style={{ padding: "12px 16px", color: "#9ca3af" }}>{r.total_opens}</td>
-                <td style={{ padding: "12px 16px", color: "#9ca3af" }}>{r.total_clicks}</td>
+                <td style={{ padding: "12px 16px", color: "#9ca3af" }}>{r.total_opens || 0}</td>
+                <td style={{ padding: "12px 16px", color: "#9ca3af" }}>{r.total_clicks || 0}</td>
                 <td style={{ padding: "12px 16px" }}>
                   <button
                     onClick={() => toggleSuppress(r.id, !r.is_suppressed)}
