@@ -14,17 +14,50 @@ const scoreColor = (s) =>
 const scoreLabel = (s) =>
   s >= 0.75 ? "Hot 🔥" : s >= 0.5 ? "Warm ☀️" : s >= 0.25 ? "Cold 🌧" : "Inactive 💤";
 
+let authToken = null;
+
+// This function silently logs in the frontend behind the scenes
+async function getAuthToken() {
+  if (authToken) return authToken; // Use cached token if we already have it
+  
+  const formData = new URLSearchParams();
+  formData.append("username", "admin");
+  formData.append("password", "secret");
+
+  try {
+    const res = await fetch(`${API}/auth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData,
+    });
+    const data = await res.json();
+    authToken = data.access_token;
+    return authToken;
+  } catch (e) {
+    console.error("Auto-login failed:", e);
+    return null;
+  }
+}
+
+// Your updated API wrapper that attaches the ID badge (token) to every request
 async function api(path, opts = {}) {
+  const token = await getAuthToken();
+  
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`; // Attach the token!
+
   const res = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...opts,
   });
+  
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
   return res.json();
 }
+// ---------------------------------------------------
 
 const MOCK_OVERVIEW = {
   total_campaigns: 12,
