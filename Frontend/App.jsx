@@ -178,10 +178,10 @@ export default function MailPulse() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const pieData = [
-    { name: "Hot", value: overview.engagement_breakdown.hot, fill: "#22c55e" },
-    { name: "Warm", value: overview.engagement_breakdown.warm, fill: "#f59e0b" },
-    { name: "Cold", value: overview.engagement_breakdown.cold, fill: "#60a5fa" },
-    { name: "Inactive", value: overview.engagement_breakdown.inactive, fill: "#f87171" },
+    { name: "Hot", value: overview?.engagement_breakdown?.hot || 0, fill: "#22c55e" },
+    { name: "Warm", value: overview?.engagement_breakdown?.warm || 0, fill: "#f59e0b" },
+    { name: "Cold", value: overview?.engagement_breakdown?.cold || 0, fill: "#60a5fa" },
+    { name: "Inactive", value: overview?.engagement_breakdown?.inactive || 0, fill: "#f87171" },
   ];
 
   return (
@@ -244,7 +244,7 @@ function DashboardPage({ overview, timeline, pieData, campaigns }) {
       <p style={{ color: "#6b7280", marginBottom: 24, fontSize: 14 }}>Real-time campaign performance & engagement intelligence</p>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
-        <StatCard label="Total Sent" value={overview.total_emails_sent.toLocaleString()} sub="all time" accent="#60a5fa" />
+        <StatCard label="Total Sent" value={overview?.total_emails_sent?.toLocaleString() || "0"} sub="all time" accent="#60a5fa" />
         <StatCard label="Avg Open Rate" value={pct(overview.avg_open_rate)} sub={`${overview.total_opens.toLocaleString()} opens`} accent="#22c55e" />
         <StatCard label="Avg Click Rate" value={pct(overview.avg_click_rate)} sub={`${overview.total_clicks.toLocaleString()} clicks`} accent="#a78bfa" />
         <StatCard label="Suppressed" value={overview.suppressed_recipients} sub="auto-filtered" accent="#f87171" />
