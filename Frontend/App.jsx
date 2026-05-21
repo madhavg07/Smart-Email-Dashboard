@@ -504,18 +504,25 @@ function ComposePage({ showToast, onRefresh }) {
     try {
       await api("/campaigns/", {
         method: "POST",
-        body: JSON.stringify({ name: form.name, subject: form.subject, body_html: form.body_html }),
+        body: JSON.stringify({ 
+          name: form.name, 
+          subject: form.subject, 
+          body_html: form.body_html,
+          // Let's also pass these in case your backend requires them!
+          personalize: form.personalize,
+          ab_test: form.ab_test
+        }),
       });
       showToast("Campaign saved as draft!");
       onRefresh();
       setForm({ name: "", subject: "", body_html: "", personalize: true, ab_test: false });
-    } catch {
-      showToast("Saved as draft (demo mode)");
+    } catch (e) {
+      // THIS will now display FastAPI's exact error message on your screen!
+      showToast(`Error: ${e.message}`, "error");
     } finally {
       setSaving(false);
     }
   };
-
   const inputStyle = {
     width: "100%", padding: "10px 14px", borderRadius: 8,
     background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb",
