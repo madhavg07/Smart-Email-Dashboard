@@ -9,12 +9,16 @@ from dotenv import load_dotenv
 # Force Python to read the .env file
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mailpulse")
+_raw_db = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mailpulse")
+# strip surrounding quotes and whitespace
+DATABASE_URL = _raw_db.strip().strip('"').strip("'")
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"connect_timeout": 30}
-)
+# Set engine connect args according to DB type. SQLite doesn't accept
+# psycopg2-specific connect_timeout; provide `check_same_thread` for sqlite.
+if "sqlite" in DATABASE_URL.lower():
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL, connect_args={"connect_timeout": 30})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
