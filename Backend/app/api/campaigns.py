@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-# IMPORTANT: You may need to adjust these import paths depending on your folder structure!
+# Ensure these imports match your folder structure
 from app.models.database import get_db
 from app.models import Campaign 
 
 router = APIRouter()
 
-# 1. This Pydantic model tells FastAPI to look for JSON, not URL parameters!
+# This tells FastAPI to expect JSON body data, exactly what React is sending
 class CampaignCreate(BaseModel):
     name: str
     subject: str
@@ -16,13 +16,12 @@ class CampaignCreate(BaseModel):
 
 @router.get("/")
 async def list_campaigns(db: Session = Depends(get_db)):
-    # Fetch all campaigns from the database
     campaigns = db.query(Campaign).all()
     return campaigns
 
 @router.post("/")
 async def create_campaign(campaign: CampaignCreate, db: Session = Depends(get_db)):
-    # Save the real data to the database
+    # Create and save the new campaign row to the PostgreSQL database
     new_campaign = Campaign(
         name=campaign.name,
         subject=campaign.subject,
