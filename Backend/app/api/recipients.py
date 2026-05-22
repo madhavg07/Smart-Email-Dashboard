@@ -43,3 +43,14 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(r)
     return r
+
+
+@router.patch("/{recipient_id}/suppress")
+def suppress_recipient(recipient_id: str, suppress: bool = False, db: Session = Depends(get_db)):
+    recipient = db.query(Recipient).filter(Recipient.id == recipient_id).first()
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    recipient.is_suppressed = suppress
+    db.commit()
+    db.refresh(recipient)
+    return {"id": recipient.id, "is_suppressed": recipient.is_suppressed}
