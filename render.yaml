@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: smart-email-dashboard-web
+    env: python
+    branch: main
+    autoDeploy: true
+    buildCommand: cd Backend && pip install -r requirements.txt
+    startCommand: cd Backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+  - type: worker
+    name: smart-email-dashboard-worker
+    env: python
+    branch: main
+    autoDeploy: true
+    buildCommand: cd Backend && pip install -r requirements.txt
+    startCommand: cd Backend && celery -A celery_tasks.tasks worker --loglevel=info --concurrency=2
