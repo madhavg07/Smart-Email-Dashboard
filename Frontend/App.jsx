@@ -341,6 +341,14 @@ function CampaignsPage({ campaigns, onRefresh, showToast }) {
 function RecipientsPage({ recipients, onRefresh, showToast }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [newRecipient, setNewRecipient] = useState({
+    email: "",
+    name: "",
+    role: "",
+    industry: "",
+    company: "",
+  });
+  const [saving, setSaving] = useState(false);
 
   const safeRecipients = recipients || [];
 
@@ -359,6 +367,29 @@ function RecipientsPage({ recipients, onRefresh, showToast }) {
       onRefresh();
     } catch {
       showToast(suppress ? "Recipient suppressed (demo)" : "Recipient re-activated (demo)");
+    }
+  };
+
+  const updateNewRecipient = (key, value) => setNewRecipient(curr => ({ ...curr, [key]: value }));
+
+  const addRecipient = async () => {
+    if (!newRecipient.email) {
+      showToast("Please enter recipient email", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api("/recipients/", {
+        method: "POST",
+        body: JSON.stringify(newRecipient),
+      });
+      showToast("Recipient added successfully");
+      setNewRecipient({ email: "", name: "", role: "", industry: "", company: "" });
+      onRefresh();
+    } catch (e) {
+      showToast(`Error: ${e.message}`, "error");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -391,6 +422,42 @@ function RecipientsPage({ recipients, onRefresh, showToast }) {
             outline: "none", width: 220,
           }}
         />
+      </div>
+
+      <div style={{ background: "#111827", borderRadius: 12, border: "1px solid #1f2937", padding: 20, marginBottom: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 12, marginBottom: 14 }}>
+          {[
+            ["Email", "email"],
+            ["Name", "name"],
+            ["Role", "role"],
+            ["Industry", "industry"],
+            ["Company", "company"],
+          ].map(([label, key]) => (
+            <div key={key}>
+              <label style={{ display: "block", fontSize: 12, color: "#9ca3af", marginBottom: 6 }}>{label}</label>
+              <input
+                value={newRecipient[key]}
+                onChange={e => updateNewRecipient(key, e.target.value)}
+                placeholder={label}
+                style={{
+                  width: "100%", padding: "10px 12px", borderRadius: 8,
+                  background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb",
+                  fontSize: 13, outline: "none",
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={addRecipient}
+          disabled={saving}
+          style={{
+            background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8,
+            padding: "12px 20px", fontSize: 14, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer",
+          }}
+        >
+          {saving ? "Adding recipient…" : "Add recipient"}
+        </button>
       </div>
 
       <div style={{ background: "#111827", borderRadius: 12, border: "1px solid #1f2937", overflow: "hidden" }}>
