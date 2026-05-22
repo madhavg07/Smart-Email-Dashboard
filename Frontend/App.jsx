@@ -16,9 +16,9 @@ const scoreLabel = (s) =>
 
 let authToken = null;
 
-// This function silently logs in the frontend behind the scenes
+// Silently logs in the frontend behind the scenes
 async function getAuthToken() {
-  if (authToken) return authToken; // Use cached token if we already have it
+  if (authToken) return authToken; 
   
   const formData = new URLSearchParams();
   formData.append("username", "admin");
@@ -39,12 +39,12 @@ async function getAuthToken() {
   }
 }
 
-// Your updated API wrapper that attaches the ID badge (token) to every request
+// API wrapper that attaches the token to every request
 async function api(path, opts = {}) {
   const token = await getAuthToken();
   
   const headers = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`; // Attach the token!
+  if (token) headers["Authorization"] = `Bearer ${token}`; 
 
   const res = await fetch(`${API}${path}`, {
     headers,
@@ -57,43 +57,6 @@ async function api(path, opts = {}) {
   }
   return res.json();
 }
-// ---------------------------------------------------
-
-const MOCK_OVERVIEW = {
-  total_campaigns: 12,
-  total_recipients: 847,
-  suppressed_recipients: 34,
-  total_emails_sent: 6840,
-  total_opens: 2193,
-  total_clicks: 412,
-  avg_open_rate: 32.1,
-  avg_click_rate: 6.0,
-  engagement_breakdown: { hot: 142, warm: 289, cold: 301, inactive: 115 },
-};
-
-const MOCK_CAMPAIGNS = [
-  { id: "1", name: "Q2 Product Launch", subject: "Introducing MailPulse 2.0 🚀", status: "sent", total_sent: 1200, total_opens: 487, total_clicks: 92, open_rate: 40.6, click_rate: 7.7, created_at: "2026-05-10T09:00:00Z" },
-  { id: "2", name: "Weekly Newsletter #22", subject: "5 Growth Hacks You're Missing", status: "sent", total_sent: 980, total_opens: 312, total_clicks: 48, open_rate: 31.8, click_rate: 4.9, created_at: "2026-05-03T10:00:00Z" },
-  { id: "3", name: "Re-engagement Blast", subject: "We miss you! Here's a gift 🎁", status: "sent", total_sent: 450, total_opens: 98, total_clicks: 22, open_rate: 21.8, click_rate: 4.9, created_at: "2026-04-28T08:00:00Z" },
-  { id: "4", name: "May Promotions", subject: "Exclusive deal — 48 hours only", status: "draft", total_sent: 0, total_opens: 0, total_clicks: 0, open_rate: 0, click_rate: 0, created_at: "2026-05-16T07:00:00Z" },
-];
-
-const MOCK_RECIPIENTS = [
-  { id: "1", email: "arjun@techcorp.in", name: "Arjun Sharma", role: "Engineer", company: "TechCorp", seriousness_score: 0.91, score_label: "Hot 🔥", total_opens: 18, total_clicks: 7, total_emails_received: 12, is_suppressed: false },
-  { id: "2", email: "priya@startup.io", name: "Priya Patel", role: "Sales", company: "Startup.io", seriousness_score: 0.72, score_label: "Warm ☀️", total_opens: 9, total_clicks: 3, total_emails_received: 10, is_suppressed: false },
-  { id: "3", email: "rahul@enterprise.com", name: "Rahul Verma", role: "Manager", company: "Enterprise Co", seriousness_score: 0.41, score_label: "Cold 🌧", total_opens: 4, total_clicks: 1, total_emails_received: 8, is_suppressed: false },
-  { id: "4", email: "sneha@noreply.com", name: "Sneha Gupta", role: null, company: null, seriousness_score: 0.08, score_label: "Inactive 💤", total_opens: 0, total_clicks: 0, total_emails_received: 5, is_suppressed: true },
-  { id: "5", email: "dev@webagency.in", name: "Dev Nair", role: "Designer", company: "Web Agency", seriousness_score: 0.85, score_label: "Hot 🔥", total_opens: 14, total_clicks: 6, total_emails_received: 11, is_suppressed: false },
-];
-
-const MOCK_OPENS_TIMELINE = [
-  { date: "2026-05-06", opens: 142 }, { date: "2026-05-07", opens: 98 },
-  { date: "2026-05-08", opens: 210 }, { date: "2026-05-09", opens: 176 },
-  { date: "2026-05-10", opens: 387 }, { date: "2026-05-11", opens: 220 },
-  { date: "2026-05-12", opens: 145 }, { date: "2026-05-13", opens: 89 },
-  { date: "2026-05-14", opens: 112 }, { date: "2026-05-15", opens: 67 },
-  { date: "2026-05-16", opens: 43 },
-];
 
 function StatCard({ label, value, sub, accent }) {
   return (
@@ -146,10 +109,10 @@ function NavItem({ icon, label, active, onClick }) {
 
 export default function MailPulse() {
   const [page, setPage] = useState("dashboard");
-  const [overview, setOverview] = useState(MOCK_OVERVIEW);
-  const [campaigns, setCampaigns] = useState(MOCK_CAMPAIGNS);
-  const [recipients, setRecipients] = useState(MOCK_RECIPIENTS);
-  const [timeline, setTimeline] = useState(MOCK_OPENS_TIMELINE);
+  const [overview, setOverview] = useState({});
+  const [campaigns, setCampaigns] = useState([]);
+  const [recipients, setRecipients] = useState([]);
+  const [timeline, setTimeline] = useState([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -168,7 +131,6 @@ export default function MailPulse() {
         api("/analytics/opens-over-time").catch(() => []),
       ]);
       
-      // Enforce data types aggressively so React maps and string functions never crash
       setOverview(ov || {});
       setCampaigns(Array.isArray(cmp) ? cmp : (cmp?.campaigns || []));
       setRecipients(Array.isArray(rcp) ? rcp : (rcp?.recipients || []));
@@ -243,7 +205,6 @@ export default function MailPulse() {
 }
 
 function DashboardPage({ overview, timeline, pieData, campaigns }) {
-  // Ensure we safely fall back if the backend object is completely empty
   const safeCampaigns = campaigns || [];
 
   return (
@@ -324,7 +285,7 @@ function CampaignsPage({ campaigns, onRefresh, showToast }) {
       showToast("Campaign queued for sending!");
       onRefresh();
     } catch (e) {
-      showToast(e.message, "error");
+      showToast(`Error: ${e.message}`, "error");
     }
   };
 
@@ -496,13 +457,12 @@ function ComposePage({ showToast, onRefresh }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
- const handleSave = async () => {
+  const handleSave = async () => {
     if (!form.name || !form.subject || !form.body_html) {
       showToast("Fill in name, subject, and body", "error"); return;
     }
     setSaving(true);
     try {
-      // We are back to safely sending JSON!
       await api("/campaigns/", {
         method: "POST",
         body: JSON.stringify({ 
@@ -511,7 +471,6 @@ function ComposePage({ showToast, onRefresh }) {
           body_html: form.body_html
         }),
       });
-
       showToast("Campaign saved as draft!");
       onRefresh();
       setForm({ name: "", subject: "", body_html: "", personalize: true, ab_test: false });
@@ -521,6 +480,7 @@ function ComposePage({ showToast, onRefresh }) {
       setSaving(false);
     }
   };
+
   const inputStyle = {
     width: "100%", padding: "10px 14px", borderRadius: 8,
     background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb",
