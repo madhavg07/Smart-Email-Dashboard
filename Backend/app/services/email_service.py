@@ -152,15 +152,21 @@ async def send_email_sendgrid(
     """Send via SendGrid HTTP API."""
     import httpx
     try:
+        # 1. Dynamically build the content array to avoid empty strings
+        email_content = []
+        if text_body:
+            email_content.append({"type": "text/plain", "value": text_body})
+            
+        email_content.append({"type": "text/html", "value": html_body})
+
+        # 2. Build the payload safely
         payload = {
             "personalizations": [{"to": [{"email": to_email, "name": to_name}]}],
             "from": {"email": FROM_EMAIL, "name": FROM_NAME},
             "subject": subject,
-            "content": [
-                {"type": "text/plain", "value": text_body or ""},
-                {"type": "text/html", "value": html_body},
-            ],
+            "content": email_content,
         }
+        
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 "https://api.sendgrid.com/v3/mail/send",
@@ -177,7 +183,6 @@ async def send_email_sendgrid(
     except Exception as e:
         logger.error(f"SendGrid exception: {e}")
         return False
-
 
 async def send_single_email(
     to_email: str,
