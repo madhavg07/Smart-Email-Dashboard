@@ -13,6 +13,7 @@ class CampaignCreate(BaseModel):
     name: str
     subject: str
     body_html: str
+    ab_variants: list[dict] | None = []  # NEW: Accept variants from the frontend!
 
 
 @router.get("/")
@@ -20,21 +21,23 @@ async def list_campaigns(db: Session = Depends(get_db)):
     campaigns = db.query(Campaign).all()
     return campaigns
 
-
+# ... inside router.post("/")
 @router.post("/")
 async def create_campaign(campaign: CampaignCreate, db: Session = Depends(get_db)):
-    # Create and save the new campaign row to the PostgreSQL database
     new_campaign = Campaign(
         name=campaign.name,
         subject=campaign.subject,
         body_html=campaign.body_html,
         status="draft",
+        ab_variants=campaign.ab_variants, # NEW: Save them to the database!
+        total_sent=0,
+        open_rate=0.0,
+        click_rate=0.0
     )
     db.add(new_campaign)
     db.commit()
     db.refresh(new_campaign)
     return new_campaign
-
 
 class SendRequest(BaseModel):
     recipient_ids: list[str] | None = None
