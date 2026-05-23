@@ -59,18 +59,26 @@ async def _call_anthropic(prompt: str, system: str) -> str:
 
 async def _call_openai(prompt: str, system: str) -> str:
     messages = []
+    # Groq works best when a system prompt is always provided
     if system:
         messages.append({"role": "system", "content": system})
+    else:
+        messages.append({"role": "system", "content": "You are a helpful AI assistant. Respond only with valid JSON."})
+        
     messages.append({"role": "user", "content": prompt})
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
-            # 1. CHANGE THE URL TO GROQ
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            # 2. CHANGE THE MODEL TO LLAMA 3
-            json={"model": "llama3-8b-8192", "messages": messages, "max_tokens": 1500},
+            # Updated to Groq's newest, most stable model
+            json={"model": "llama-3.1-8b-instant", "messages": messages, "max_tokens": 1500},
         )
+        
+        # If Groq gets mad, this will throw the exact error to your frontend toast!
+        if resp.status_code != 200:
+            raise ValueError(f"Groq API Error: {resp.text}")
+            
         resp.raise_for_status()
         data = resp.json()
         return data["choices"][0]["message"]["content"]

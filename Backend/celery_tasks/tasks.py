@@ -1,4 +1,8 @@
+import sys
 import os
+# Force Celery to recognize the 'Backend' folder as the root directory
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import asyncio
 import uuid
 import logging
