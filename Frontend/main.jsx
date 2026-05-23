@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import MailPulse from "./App.jsx";
+import MailPulse from "./src/App.jsx";
 
 function init() {
   const el = document.getElementById("root");
