@@ -5,6 +5,9 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
 
+import { api, getToken, clearToken } from './api';
+import Login from './pages/Login';
+
 const API = "https://smart-email-dashboard.onrender.com/api";
 
 const fmt = (n, d = 1) => (n ?? 0).toFixed(d);
@@ -108,6 +111,9 @@ function NavItem({ icon, label, active, onClick }) {
 }
 
 export default function MailPulse() {
+
+  const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
+  
   const [page, setPage] = useState("dashboard");
   const [overview, setOverview] = useState({});
   const [campaigns, setCampaigns] = useState([]);
@@ -115,6 +121,16 @@ export default function MailPulse() {
   const [timeline, setTimeline] = useState([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+
+  // If not logged in, ONLY show the Login screen
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
+  }
+
+  const handleLogout = () => {
+    clearToken();
+    setIsAuthenticated(false);
+  };
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
@@ -519,10 +535,23 @@ function RecipientsPage({ recipients, onRefresh, showToast }) {
 }
 
 function ComposePage({ showToast, onRefresh }) {
-  const [form, setForm] = useState({ name: "", subject: "", body_html: "", personalize: true, ab_test: false });
+  const [form, setForm] = useState({ 
+    name: "", subject: "", body_html: "", 
+    personalize: true, ab_test: false,
+    variants: [
+      { subject: "", angle: "Variant A" },
+      { subject: "", angle: "Variant B" }
+    ]
+  });
   const [saving, setSaving] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  
+  const updateVariant = (index, val) => {
+    const newVariants = [...form.variants];
+    newVariants[index].subject = val;
+    set("variants", newVariants);
+  };
 
   const handleSave = async () => {
     if (!form.name || !form.subject || !form.body_html) {
@@ -535,12 +564,14 @@ function ComposePage({ showToast, onRefresh }) {
         body: JSON.stringify({ 
           name: form.name, 
           subject: form.subject, 
-          body_html: form.body_html
+          body_html: form.body_html,
+          // Send the frontend variant inputs to the backend!
+          ab_variants: form.ab_test ? form.variants : [] 
         }),
       });
       showToast("Campaign saved as draft!");
       onRefresh();
-      setForm({ name: "", subject: "", body_html: "", personalize: true, ab_test: false });
+      setForm({ name: "", subject: "", body_html: "", personalize: true, ab_test: false, variants: [{ subject: "", angle: "Variant A" }, { subject: "", angle: "Variant B" }] });
     } catch (e) {
       showToast(`Error: ${e.message}`, "error");
     } finally {
@@ -551,52 +582,55 @@ function ComposePage({ showToast, onRefresh }) {
   const inputStyle = {
     width: "100%", padding: "10px 14px", borderRadius: 8,
     background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb",
-    fontSize: 14, outline: "none", boxSizing: "border-box",
+    fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 16
   };
 
   return (
     <div style={{ maxWidth: 720 }}>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", marginBottom: 6 }}>Compose Campaign</h1>
-      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 24 }}>
-        Draft your email. AI will personalize it per recipient when you send.
-      </p>
+      
+      <div style={{ background: "#111827", borderRadius: 12, padding: 24, border: "1px solid #1f2937", display: "flex", flexDirection: "column" }}>
+        <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600, marginBottom: 6 }}>CAMPAIGN NAME</label>
+        <input style={inputStyle} value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. May Newsletter" />
+        
+        <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600, marginBottom: 6 }}>PRIMARY SUBJECT LINE</label>
+        <input style={inputStyle} value={form.subject} onChange={e => set("subject", e.target.value)} placeholder="Your compelling subject line…" />
+        
+        <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600, marginBottom: 6 }}>EMAIL BODY (HTML)</label>
+        <textarea
+          style={{ ...inputStyle, minHeight: 180, resize: "vertical", fontFamily: "monospace" }}
+          value={form.body_html}
+          onChange={e => set("body_html", e.target.value)}
+          placeholder={`<p>Hi {name},</p>`}
+        />
 
-      <div style={{ background: "#111827", borderRadius: 12, padding: 24, border: "1px solid #1f2937", display: "flex", flexDirection: "column", gap: 16 }}>
-        <div>
-          <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600, display: "block", marginBottom: 6 }}>CAMPAIGN NAME</label>
-          <input style={inputStyle} value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. May Newsletter" />
-        </div>
-        <div>
-          <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600, display: "block", marginBottom: 6 }}>SUBJECT LINE</label>
-          <input style={inputStyle} value={form.subject} onChange={e => set("subject", e.target.value)} placeholder="Your compelling subject line…" />
-        </div>
-        <div>
-          <label style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600, display: "block", marginBottom: 6 }}>EMAIL BODY (HTML or plain text)</label>
-          <textarea
-            style={{ ...inputStyle, minHeight: 220, resize: "vertical", fontFamily: "monospace" }}
-            value={form.body_html}
-            onChange={e => set("body_html", e.target.value)}
-            placeholder={`<p>Hi {name},</p>\n<p>Your email content here. Links will be auto-tracked.</p>\n<p><a href="https://yoursite.com/offer">Claim your offer →</a></p>`}
-          />
+        {/* FRONTEND A/B TEST CONFIGURATION */}
+        <div style={{ display: "flex", gap: 20, marginBottom: 16 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, color: "#d1d5db" }}>
+            <input type="checkbox" checked={form.ab_test} onChange={e => set("ab_test", e.target.checked)} style={{ width: 16, height: 16 }} />
+            🧪 Enable A/B Testing (Configure below)
+          </label>
         </div>
 
-        <div style={{ display: "flex", gap: 20 }}>
-          {[
-            { key: "personalize", label: "🤖 AI Personalize per recipient" },
-            { key: "ab_test", label: "🧪 Run A/B test (3 variants)" },
-          ].map(opt => (
-            <label key={opt.key} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, color: "#d1d5db" }}>
-              <input type="checkbox" checked={form[opt.key]} onChange={e => set(opt.key, e.target.checked)}
-                style={{ width: 16, height: 16, accentColor: "#3b82f6" }} />
-              {opt.label}
-            </label>
-          ))}
-        </div>
+        {form.ab_test && (
+          <div style={{ background: "#0d1117", padding: 16, borderRadius: 8, border: "1px dashed #374151", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 12 }}>Provide alternate subject lines. The system will test these against your Primary subject.</div>
+            {form.variants.map((v, i) => (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, color: "#60a5fa", fontWeight: 600, display: "block", marginBottom: 4 }}>{v.angle.toUpperCase()}</label>
+                <input 
+                  style={{ ...inputStyle, marginBottom: 0, padding: "8px 12px" }} 
+                  value={v.subject} 
+                  onChange={e => updateVariant(i, e.target.value)} 
+                  placeholder={`Alternate subject line ${i + 1}...`} 
+                />
+              </div>
+            ))}
+          </div>
+        )}
 
         <button onClick={handleSave} disabled={saving} style={{
-          background: "#1d4ed8", color: "#fff", border: "none",
-          borderRadius: 8, padding: "12px 24px", fontSize: 14, fontWeight: 700,
-          cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.6 : 1, alignSelf: "flex-start",
+          background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "12px 24px", fontSize: 14, fontWeight: 700, cursor: "pointer"
         }}>
           {saving ? "Saving…" : "💾 Save as Draft"}
         </button>
