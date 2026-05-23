@@ -65,9 +65,11 @@ async def _call_openai(prompt: str, system: str) -> str:
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
+            # 1. CHANGE THE URL TO GROQ
+            "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            json={"model": "gpt-4o", "messages": messages, "max_tokens": 1500},
+            # 2. CHANGE THE MODEL TO LLAMA 3
+            json={"model": "llama3-8b-8192", "messages": messages, "max_tokens": 1500},
         )
         resp.raise_for_status()
         data = resp.json()

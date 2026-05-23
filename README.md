@@ -97,12 +97,14 @@ uvicorn app.main:app --reload
 # PowerShell
 cd backend
 .\venv\Scripts\Activate.ps1
-celery -A celery_tasks.tasks worker --loglevel=info
+# On Windows, use the solo pool to avoid billiard semaphore permission issues:
+celery -A celery_tasks.tasks worker --loglevel=info --pool=solo --concurrency=1
 
 # CMD
 cd backend
 venv\Scripts\activate.bat
-celery -A celery_tasks.tasks worker --loglevel=info
+# On Windows, use the solo pool to avoid billiard semaphore permission issues:
+celery -A celery_tasks.tasks worker --loglevel=info --pool=solo --concurrency=1
 
 # 3. Celery beat scheduler (new terminal)
 # PowerShell
