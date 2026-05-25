@@ -154,6 +154,7 @@ export default function MailPulse() {
           { id: "campaigns", icon: "📨", label: "Campaigns" },
           { id: "recipients", icon: "👥", label: "Recipients" },
           { id: "compose", icon: "✍️", label: "Compose" },
+          { id: "AI compose", icon: "🤖", label: "AI Compose" },
           { id: "ai", icon: "🤖", label: "AI Tools" },
         ].map((n) => (
           <NavItem key={n.id} {...n} active={page === n.id} onClick={() => setPage(n.id)} />
@@ -186,6 +187,7 @@ export default function MailPulse() {
         {page === "campaigns" && <CampaignsPage campaigns={campaigns} onRefresh={loadData} showToast={showToast} />}
         {page === "recipients" && <RecipientsPage recipients={recipients} onRefresh={loadData} showToast={showToast} />}
         {page === "compose" && <ComposePage showToast={showToast} onRefresh={loadData} />}
+        {page === "AI compose" && <UnifiedAIFlowPage showToast={showToast} onRefresh={loadData} />}
         {page === "ai" && <AIToolsPage showToast={showToast} />}
       </main>
     </div>
