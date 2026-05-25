@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.database import get_db, Recipient
 from app.models import Campaign
+from app.models.database import SendLog, Recipient
 
 router = APIRouter()
 
@@ -67,3 +68,22 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
         raise HTTPException(status_code=500, detail=f"Failed to queue send task: {e}")
 
     return {"status": "queued", "campaign_id": campaign_id, "queued": len(recipient_ids)}
+
+@router.get("/{campaign_id}/report")
+async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(get_db)):
+    """Fetch detailed tracking logs for a specific campaign"""
+    logs = db.query(SendLog).filter(SendLog.campaign_id == campaign_id).all()
+    
+    report = []
+    for log in logs:
+        recipient = db.query(Recipient).filter(Recipient.id == log.recipient_id).first()
+        report.append({
+            "email": recipient.email if recipient else "Unknown",
+            "name": recipient.name if recipient else "Unknown",
+            "variant": log.variant,
+            "opens": log.open_count,
+            "clicks": log.click_count,
+            "first_opened": log.first_opened_at
+        })
+        
+    return {"logs": report}

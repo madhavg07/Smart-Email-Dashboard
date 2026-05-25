@@ -8,6 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.models.database import get_db, Recipient
 
+import csv
+import io
+from fastapi import UploadFile, File
+
 router = APIRouter()
 
 
@@ -54,3 +58,33 @@ def suppress_recipient(recipient_id: str, suppress: bool = False, db: Session = 
     db.commit()
     db.refresh(recipient)
     return {"id": recipient.id, "is_suppressed": recipient.is_suppressed}
+
+
+@router.post("/upload")
+async def upload_recipients_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Bulk upload recipients via CSV. Expected columns: email, name, role, company, cluster"""
+    contents = await file.read()
+    decoded = contents.decode('utf-8-sig') # Handle BOM
+    reader = csv.DictReader(io.StringIO(decoded))
+    
+    added_count = 0
+    for row in reader:
+        email = row.get("email")
+        if not email:
+            continue
+            
+        # Check for duplicates
+        existing = db.query(Recipient).filter(Recipient.email == email).first()
+        if not existing:
+            new_rep = Recipient(
+                email=email,
+                name=row.get("name", ""),
+                role=row.get("role", ""),
+                company=row.get("company", ""),
+                metadata_={"cluster": row.get("cluster", "Default Group")} # Grouping feature!
+            )
+            db.add(new_rep)
+            added_count += 1
+            
+    db.commit()
+    return {"message": f"Successfully imported {added_count} recipients."}
