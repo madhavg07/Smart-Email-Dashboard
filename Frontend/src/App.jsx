@@ -605,7 +605,8 @@ function AIToolsPage({ showToast }) {
   const [abForm, setAbForm] = useState({ subject: "We have something for you", body: "We just launched a new feature that saves you 3 hours a week." });
 
   const run = async () => {
-    setLoading(true); setResult(null);
+    setLoading(true); 
+    setResult(null);
     try {
       let res;
       if (activeTab === "personalize") {
@@ -616,19 +617,14 @@ function AIToolsPage({ showToast }) {
         res = await api("/ai/ab-variants", { method: "POST", body: JSON.stringify({ subject: abForm.subject, body: abForm.body, num_variants: 3 }) });
       }
       setResult(res);
+      showToast("AI processing complete!", "success");
     } catch (e) {
-      if (activeTab === "personalize") {
-        setResult({ subject: `${pForm.company} × Your Next Build: A Technical Deep-Dive`, body: `Hi ${pForm.name},\n\nAs a software engineer at ${pForm.company}, I figured you'd appreciate the technical specifics rather than marketing fluff.\n\nOur latest update reduces API latency by 40% through connection pooling and lazy evaluation. The diff is minimal — 3 lines of config.\n\nHappy to share the benchmark results if useful.\n\nCheers` });
-      } else if (activeTab === "spam") {
-        setResult({ score: 8, issues: ["Excessive capitalization (FREE, ACT NOW, CLICK HERE)", "Spam trigger words: FREE, GUARANTEED, LIMITED TIME, OFFER", "Multiple exclamation marks", "Missing unsubscribe language", "Urgency manipulation tactics"], suggestions: ["Remove ALL CAPS", "Replace 'FREE' with specific value proposition", "Add unsubscribe link", "Use natural sentence structure", "Replace 'CLICK HERE' with descriptive link text"] });
-      } else {
-        setResult({ variants: [{ subject: "How we cut API latency by 40% (with 3 lines)", angle: "Curiosity gap + specificity", rationale: "Engineers respond to technical claims with concrete metrics" }, { subject: "3x your team's throughput this sprint", angle: "Direct benefit / ROI", rationale: "Quantified outcome appeals to busy decision-makers" }, { subject: "Is your stack leaving performance on the table?", angle: "Question format", rationale: "Challenges assumptions, invites self-assessment" }] });
-      }
+      // We removed the fake data fallback! Now it will show you the ACTUAL error.
+      showToast(`AI Error: ${e.message}`, "error");
     } finally {
       setLoading(false);
     }
   };
-
   const inputStyle = { width: "100%", padding: "8px 12px", borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb", fontSize: 13, outline: "none", boxSizing: "border-box", marginTop: 4 };
   const labelStyle = { fontSize: 12, color: "#9ca3af", fontWeight: 600 };
 
