@@ -4,7 +4,7 @@ from fastapi.responses import Response
 import base64
 import logging
 
-from Backend.app.api import groups
+from app.api import groups
 from app.api import campaigns, recipients, tracking, ai_tools, analytics, webhooks, auth
 from app.models.database import engine, Base
 from app.services.auth_services import get_current_user
