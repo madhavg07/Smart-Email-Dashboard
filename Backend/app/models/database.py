@@ -6,22 +6,17 @@ import os
 import uuid
 from dotenv import load_dotenv
 
-# Force Python to read the .env file
 load_dotenv()
 
 _raw_db = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mailpulse")
-# strip surrounding quotes and whitespace
 DATABASE_URL = _raw_db.strip().strip('"').strip("'")
 
-# Set engine connect args according to DB type. SQLite doesn't accept
-# psycopg2-specific connect_timeout; provide `check_same_thread` for sqlite.
 if "sqlite" in DATABASE_URL.lower():
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
     engine = create_engine(DATABASE_URL, connect_args={"connect_timeout": 30})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
 
 def get_db():
     db = SessionLocal()
@@ -30,10 +25,16 @@ def get_db():
     finally:
         db.close()
 
-
 def gen_uuid():
     return str(uuid.uuid4())
 
+class Group(Base):
+    __tablename__ = "groups"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class Recipient(Base):
     __tablename__ = "recipients"
@@ -41,18 +42,17 @@ class Recipient(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     email = Column(String, unique=True, nullable=False, index=True)
     name = Column(String)
-    role = Column(String)           # engineer, sales, manager, etc.
+    role = Column(String)           
     industry = Column(String)
     company = Column(String)
     metadata_ = Column(JSON, default={})
 
-    # ML engagement score (0.0 - 1.0)
     seriousness_score = Column(Float, default=0.5)
     total_opens = Column(Integer, default=0)
     total_clicks = Column(Integer, default=0)
     total_emails_received = Column(Integer, default=0)
-    avg_open_delay_minutes = Column(Float, default=None)  # avg minutes to open after receive
-    is_suppressed = Column(Boolean, default=False)       # blocked from future campaigns
+    avg_open_delay_minutes = Column(Float, default=None)  
+    is_suppressed = Column(Boolean, default=False)       
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -60,7 +60,6 @@ class Recipient(Base):
     send_logs = relationship("SendLog", back_populates="recipient")
     open_events = relationship("OpenEvent", back_populates="recipient")
     click_events = relationship("ClickEvent", back_populates="recipient")
-
 
 class Campaign(Base):
     __tablename__ = "campaigns"
@@ -70,17 +69,14 @@ class Campaign(Base):
     subject = Column(String, nullable=False)
     body_html = Column(Text, nullable=False)
     body_text = Column(Text)
-    status = Column(String, default="draft")  # draft, sending, sent, paused
+    status = Column(String, default="draft")  
 
-    # A/B Testing
-    ab_variants = Column(JSON, default=[])    # list of {subject, body, pct_recipients}
+    ab_variants = Column(JSON, default=[])    
     winning_variant = Column(String, default=None)
 
-    # Scheduling
     scheduled_at = Column(DateTime, default=None)
     sent_at = Column(DateTime, default=None)
 
-    # Stats (cached)
     total_recipients = Column(Integer, default=0)
     total_sent = Column(Integer, default=0)
     total_opens = Column(Integer, default=0)
@@ -92,17 +88,15 @@ class Campaign(Base):
 
     send_logs = relationship("SendLog", back_populates="campaign")
 
-
 class SendLog(Base):
-    """One row per email sent to one recipient in one campaign."""
     __tablename__ = "send_logs"
 
     id = Column(String, primary_key=True, default=gen_uuid)
     campaign_id = Column(String, ForeignKey("campaigns.id"), nullable=False)
     recipient_id = Column(String, ForeignKey("recipients.id"), nullable=False)
 
-    tracking_token = Column(String, unique=True, index=True)   # pixel token
-    variant = Column(String, default="A")                       # A/B variant
+    tracking_token = Column(String, unique=True, index=True)   
+    variant = Column(String, default="A")                       
     personalized_subject = Column(String)
     personalized_body = Column(Text)
 
@@ -115,7 +109,6 @@ class SendLog(Base):
     recipient = relationship("Recipient", back_populates="send_logs")
     open_events = relationship("OpenEvent", back_populates="send_log")
     click_events = relationship("ClickEvent", back_populates="send_log")
-
 
 class OpenEvent(Base):
     __tablename__ = "open_events"
@@ -130,7 +123,6 @@ class OpenEvent(Base):
 
     send_log = relationship("SendLog", back_populates="open_events")
     recipient = relationship("Recipient", back_populates="open_events")
-
 
 class ClickEvent(Base):
     __tablename__ = "click_events"

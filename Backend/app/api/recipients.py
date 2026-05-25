@@ -14,27 +14,27 @@ from fastapi import UploadFile, File
 
 router = APIRouter()
 
-
 class RecipientCreate(BaseModel):
     email: EmailStr
     name: str | None = None
     role: str | None = None
     industry: str | None = None
     company: str | None = None
-
+    group_id: str | None = None
 
 @router.get("/")
 def list_recipients(db: Session = Depends(get_db)):
-    recipients = db.query(Recipient).all()
-    return recipients
-
+    return db.query(Recipient).all()
 
 @router.post("/")
 def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db)):
-    # prevent duplicates
     existing = db.query(Recipient).filter(Recipient.email == payload.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Recipient already exists")
+
+    metadata_dict = {}
+    if payload.group_id:
+        metadata_dict["group_id"] = payload.group_id
 
     r = Recipient(
         email=payload.email,
@@ -42,12 +42,12 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db)):
         role=payload.role,
         industry=payload.industry,
         company=payload.company,
+        metadata_=metadata_dict
     )
     db.add(r)
     db.commit()
     db.refresh(r)
     return r
-
 
 @router.patch("/{recipient_id}/suppress")
 def suppress_recipient(recipient_id: str, suppress: bool = False, db: Session = Depends(get_db)):
@@ -58,7 +58,6 @@ def suppress_recipient(recipient_id: str, suppress: bool = False, db: Session = 
     db.commit()
     db.refresh(recipient)
     return {"id": recipient.id, "is_suppressed": recipient.is_suppressed}
-
 
 @router.post("/upload")
 async def upload_recipients_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
