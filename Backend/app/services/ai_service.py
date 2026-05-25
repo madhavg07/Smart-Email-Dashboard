@@ -15,6 +15,8 @@ import json
 import httpx
 import logging
 from typing import Optional
+import json
+
 
 logger = logging.getLogger(__name__)
 
@@ -83,83 +85,63 @@ async def _call_openai(prompt: str, system: str) -> str:
         data = resp.json()
         return data["choices"][0]["message"]["content"]
 
-
-async def personalize_email(
-    subject: str,
-    body: str,
-    recipient_name: str,
-    recipient_role: Optional[str],
-    recipient_industry: Optional[str],
-    recipient_company: Optional[str],
-) -> dict:
+async def personalize_email(subject: str, body: str, recipient_name: str, recipient_role: str = None, recipient_industry: str = None, recipient_company: str = None) -> dict:
+    prompt = f"""
+    Rewrite this email to personalize it for {recipient_name}.
+    Role: {recipient_role}
+    Industry: {recipient_industry}
+    Company: {recipient_company}
+    
+    Original Subject: {subject}
+    Original Body: {body}
+    
+    Respond ONLY with a valid JSON object containing "subject" and "body" keys. Do not include markdown formatting.
     """
-    Rewrite subject and body for a specific recipient persona.
-    Returns {"subject": "...", "body": "..."}
-    """
-    persona = f"Name: {recipient_name}"
-    if recipient_role:
-        persona += f", Role: {recipient_role}"
-    if recipient_industry:
-        persona += f", Industry: {recipient_industry}"
-    if recipient_company:
-        persona += f", Company: {recipient_company}"
-
-    system = """You are an expert email copywriter specializing in personalized B2B communication.
-Your goal is to rewrite emails so they feel personally crafted for the recipient, avoid spam filters,
-and feel human and genuine. Never sound robotic or templated."""
-
-    prompt = f"""Rewrite the following email for this specific recipient:
-Recipient Info: {persona}
-
-ORIGINAL SUBJECT: {subject}
-
-ORIGINAL BODY:
-{body}
-
-Rules:
-- Keep the core message identical
-- Adjust tone, vocabulary, and framing to match the recipient's role/industry
-- Engineers → technical, concise, data-driven
-- Sales/Marketing → value-driven, conversational, benefits-focused  
-- Executives → strategic, high-level, ROI-focused
-- Insert the recipient's name naturally once
-- Avoid spam trigger words (FREE, URGENT, CLICK NOW, etc.)
-- Keep subject line under 60 characters
-
-Respond ONLY with valid JSON, no markdown:
-{{"subject": "...", "body": "..."}}"""
-
-    raw = await call_llm(prompt, system)
-    # Strip markdown fences if present
+    raw = await call_llm(prompt, "You are an expert email marketer. Output strictly in JSON format.")
+    
+    # Safety net: Strip markdown blocks if Groq adds them!
     raw = raw.strip().strip("```json").strip("```").strip()
     return json.loads(raw)
-
 
 async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -> list:
+    prompt = f"""
+    Create {num_variants} different A/B test variants for this email.
+    Original Subject: {subject}
+    Original Body: {body}
+    
+    Respond ONLY with a valid JSON array of objects. Each object must have "subject", "angle", and "rationale". Do not include markdown formatting.
     """
-    Generate N subject line variants for A/B testing.
-    Returns list of {"subject": "...", "rationale": "..."}
-    """
-    prompt = f"""Generate {num_variants} distinct subject line variants for A/B testing this email.
-
-ORIGINAL SUBJECT: {subject}
-
-EMAIL BODY SUMMARY:
-{body[:500]}
-
-For each variant, use a different psychological angle:
-- Curiosity gap
-- Direct benefit / ROI
-- Urgency / scarcity
-- Social proof / numbers
-- Question format
-
-Respond ONLY with valid JSON array, no markdown:
-[{{"subject": "...", "angle": "...", "rationale": "..."}}]"""
-
-    raw = await call_llm(prompt)
+    raw = await call_llm(prompt, "You are a conversion copywriter. Output strictly in JSON array format.")
+    
+    # Safety net: Strip markdown blocks
     raw = raw.strip().strip("```json").strip("```").strip()
     return json.loads(raw)
+
+# async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -> list:
+#     """
+#     Generate N subject line variants for A/B testing.
+#     Returns list of {"subject": "...", "rationale": "..."}
+#     """
+#     prompt = f"""Generate {num_variants} distinct subject line variants for A/B testing this email.
+
+# ORIGINAL SUBJECT: {subject}
+
+# EMAIL BODY SUMMARY:
+# {body[:500]}
+
+# For each variant, use a different psychological angle:
+# - Curiosity gap
+# - Direct benefit / ROI
+# - Urgency / scarcity
+# - Social proof / numbers
+# - Question format
+
+# Respond ONLY with valid JSON array, no markdown:
+# [{{"subject": "...", "angle": "...", "rationale": "..."}}]"""
+
+#     raw = await call_llm(prompt)
+#     raw = raw.strip().strip("```json").strip("```").strip()
+#     return json.loads(raw)
 
 
 async def check_spam_score(subject: str, body: str) -> dict:
