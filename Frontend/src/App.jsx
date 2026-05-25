@@ -67,9 +67,8 @@ function NavItem({ icon, label, active, onClick }) {
 }
 
 export default function MailPulse() {
-
+  // 1. ALL useState hooks must be at the very top
   const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
-  
   const [page, setPage] = useState("dashboard");
   const [overview, setOverview] = useState({});
   const [campaigns, setCampaigns] = useState([]);
@@ -77,11 +76,6 @@ export default function MailPulse() {
   const [timeline, setTimeline] = useState([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
-
-  // If not logged in, ONLY show the Login screen
-  if (!isAuthenticated) {
-    return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
-  }
 
   const handleLogout = () => {
     clearToken();
@@ -93,7 +87,11 @@ export default function MailPulse() {
     setTimeout(() => setToast(null), 3500);
   };
 
+  // 2. useCallback hook
   const loadData = useCallback(async () => {
+    // Crucial: Don't try to fetch data if we aren't logged in
+    if (!isAuthenticated) return; 
+
     setLoading(true);
     try {
       const [ov, cmp, rcp, tl] = await Promise.all([
@@ -112,9 +110,14 @@ export default function MailPulse() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAuthenticated]); // Added dependency
 
-  useEffect(() => { loadData(); }, [loadData]);
+  // 3. useEffect hook
+  useEffect(() => { 
+    if (isAuthenticated) {
+      loadData(); 
+    }
+  }, [isAuthenticated, loadData]);
 
   const pieData = [
     { name: "Hot", value: overview?.engagement_breakdown?.hot || 0, fill: "#22c55e" },
@@ -123,6 +126,12 @@ export default function MailPulse() {
     { name: "Inactive", value: overview?.engagement_breakdown?.inactive || 0, fill: "#f87171" },
   ];
 
+  // 4. NOW we can do the early return (AFTER all hooks are declared!)
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
+  }
+
+  // 5. The Main Dashboard UI
   return (
     <div style={{
       display: "flex", minHeight: "100vh",
@@ -149,8 +158,15 @@ export default function MailPulse() {
         ].map((n) => (
           <NavItem key={n.id} {...n} active={page === n.id} onClick={() => setPage(n.id)} />
         ))}
+        
         <div style={{ marginTop: "auto", padding: "12px 8px", borderTop: "1px solid #1f2937" }}>
-          <div style={{ fontSize: 11, color: "#4b5563" }}>v1.0.0 · All systems nominal</div>
+          <button onClick={handleLogout} style={{
+            background: "transparent", color: "#f87171", border: "none", cursor: "pointer",
+            fontSize: 13, fontWeight: 600, width: "100%", textAlign: "left", padding: "8px 0"
+          }}>
+            🚪 Logout
+          </button>
+          <div style={{ fontSize: 11, color: "#4b5563", marginTop: 8 }}>v1.0.0 · All systems nominal</div>
         </div>
       </aside>
 
@@ -249,59 +265,53 @@ function DashboardPage({ overview, timeline, pieData, campaigns }) {
 }
 
 function CampaignsPage({ campaigns, onRefresh, showToast }) {
-  const safeCampaigns = campaigns || [];
+  const [reportData, setReportData] = useState(null);
 
-  const handleSend = async (id) => {
+  const viewReport = async (id) => {
     try {
-      await api(`/campaigns/${id}/send?personalize=true&ab_test=false`, { method: "POST" });
-      showToast("Campaign queued for sending!");
-      onRefresh();
-    } catch (e) {
-      showToast(`Error: ${e.message}`, "error");
-    }
+      const res = await api(`/campaigns/${id}/report`);
+      setReportData(res.logs);
+    } catch (e) { showToast("Failed to load report", "error"); }
   };
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>Campaigns</h1>
-          <p style={{ color: "#6b7280", fontSize: 14, margin: "4px 0 0" }}>{safeCampaigns.length} campaigns total</p>
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb" }}>Campaigns</h1>
+      
+      {/* Tracking Report Modal */}
+      {reportData && (
+        <div style={{ background: "#111827", padding: 24, borderRadius: 12, border: "1px solid #3b82f6", marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <h3 style={{ color: "#60a5fa", marginTop: 0 }}>Detailed Tracking Report</h3>
+            <button onClick={() => setReportData(null)} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer" }}>Close X</button>
+          </div>
+          <table style={{ width: "100%", textAlign: "left", color: "#d1d5db", fontSize: 13 }}>
+            <thead><tr><th>Recipient</th><th>Variant</th><th>Opens</th><th>Clicks</th></tr></thead>
+            <tbody>
+              {reportData.map((log, i) => (
+                <tr key={i} style={{ borderTop: "1px solid #1f2937" }}>
+                  <td style={{ padding: "8px 0" }}>{log.email}</td>
+                  <td>{log.variant}</td>
+                  <td style={{ color: log.opens > 0 ? "#4ade80" : "#9ca3af" }}>{log.opens}</td>
+                  <td>{log.clicks}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
+      )}
 
       <div style={{ display: "grid", gap: 12 }}>
-        {safeCampaigns.map(c => (
+        {campaigns.map(c => (
           <div key={c.id} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", gap: 20 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                <span style={{ fontWeight: 600, color: "#f9fafb" }}>{c.name}</span>
-                <Badge status={c.status} />
-              </div>
+              <span style={{ fontWeight: 600, color: "#f9fafb" }}>{c.name}</span>
               <div style={{ color: "#9ca3af", fontSize: 13 }}>{c.subject}</div>
             </div>
-
-            <div style={{ display: "flex", gap: 28, fontSize: 13 }}>
-              {[
-                { label: "Sent", val: (c.total_sent || 0).toLocaleString() },
-                { label: "Opens", val: pct(c.open_rate || 0), color: (c.open_rate || 0) > 30 ? "#22c55e" : "#f59e0b" },
-                { label: "Clicks", val: pct(c.click_rate || 0), color: "#a78bfa" },
-              ].map(s => (
-                <div key={s.label} style={{ textAlign: "center" }}>
-                  <div style={{ color: s.color || "#9ca3af", fontWeight: 700, fontSize: 16 }}>{s.val}</div>
-                  <div style={{ color: "#4b5563", fontSize: 11 }}>{s.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {c.status === "draft" && (
-              <button onClick={() => handleSend(c.id)} style={{
-                background: "#1d4ed8", color: "#fff", border: "none",
-                borderRadius: 8, padding: "8px 16px", fontSize: 13,
-                cursor: "pointer", fontWeight: 600,
-              }}>
-                Send Now ▶
-              </button>
+            {c.status === "sent" ? (
+              <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer" }}>📊 View Report</button>
+            ) : (
+              <button style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px" }}>Send Now ▶</button>
             )}
           </div>
         ))}
@@ -591,6 +601,129 @@ function ComposePage({ showToast, onRefresh }) {
           {saving ? "Saving…" : "💾 Save as Draft"}
         </button>
       </div>
+    </div>
+  );
+}
+
+function UnifiedAIFlowPage({ showToast, onRefresh }) {
+  const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [campaignName, setCampaignName] = useState("");
+  
+  // Step 1: Base Details
+  const [baseForm, setBaseForm] = useState({ subject: "", body: "", name: "Alex", role: "Manager", company: "TechCorp", industry: "Software" });
+  
+  // Step 2 & 3 & 4 Data
+  const [personalized, setPersonalized] = useState({ subject: "", body: "" });
+  const [variants, setVariants] = useState([]);
+  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [spamScore, setSpamScore] = useState(null);
+
+  const runPersonalization = async () => {
+    setLoading(true);
+    try {
+      const res = await api("/ai/personalize", { method: "POST", body: JSON.stringify({ subject: baseForm.subject, body: baseForm.body, recipient_name: baseForm.name, recipient_role: baseForm.role, recipient_industry: baseForm.industry, recipient_company: baseForm.company }) });
+      setPersonalized(res);
+      setStep(2);
+      showToast("Personalization applied!", "success");
+    } catch (e) { showToast(e.message, "error"); }
+    setLoading(false);
+  };
+
+  const runABVariants = async () => {
+    setLoading(true);
+    try {
+      const res = await api("/ai/ab-variants", { method: "POST", body: JSON.stringify({ subject: personalized.subject, body: personalized.body, num_variants: 3 }) });
+      setVariants(res.variants);
+      setStep(3);
+      showToast("Variants generated!", "success");
+    } catch (e) { showToast(e.message, "error"); }
+    setLoading(false);
+  };
+
+  const runSpamCheck = async (variant) => {
+    setSelectedVariant(variant);
+    setLoading(true);
+    try {
+      const res = await api("/ai/spam-check", { method: "POST", body: JSON.stringify({ subject: variant.subject, body: personalized.body }) });
+      setSpamScore(res);
+      setStep(4);
+    } catch (e) { showToast(e.message, "error"); }
+    setLoading(false);
+  };
+
+  const saveToDrafts = async () => {
+    if (!campaignName) return showToast("Provide a campaign name first", "error");
+    setLoading(true);
+    try {
+      await api("/campaigns/", { method: "POST", body: JSON.stringify({ 
+        name: campaignName, 
+        subject: selectedVariant.subject, 
+        body_html: personalized.body, 
+        ab_variants: variants 
+      })});
+      showToast("Saved to Drafts!", "success");
+      onRefresh();
+      setStep(1); // Reset
+    } catch (e) { showToast(e.message, "error"); }
+    setLoading(false);
+  };
+
+  const inputStyle = { width: "100%", padding: "10px", borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb", marginBottom: 12 };
+
+  return (
+    <div style={{ maxWidth: 800 }}>
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", marginBottom: 6 }}>Unified AI Composer</h1>
+      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 24 }}>Personalize ➔ Generate Variants ➔ Spam Check ➔ Save Draft</p>
+
+      {/* STEP 1: BASE INPUT */}
+      <div style={{ background: "#111827", borderRadius: 12, padding: 24, border: step === 1 ? "1px solid #3b82f6" : "1px solid #1f2937", opacity: step < 1 ? 0.5 : 1, marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0, color: "#60a5fa" }}>1. Base Context</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <input style={inputStyle} placeholder="Recipient Name" value={baseForm.name} onChange={e => setBaseForm({...baseForm, name: e.target.value})} />
+          <input style={inputStyle} placeholder="Role (e.g., CEO)" value={baseForm.role} onChange={e => setBaseForm({...baseForm, role: e.target.value})} />
+        </div>
+        <input style={inputStyle} placeholder="Base Subject" value={baseForm.subject} onChange={e => setBaseForm({...baseForm, subject: e.target.value})} />
+        <textarea style={{...inputStyle, minHeight: 100}} placeholder="Base Body..." value={baseForm.body} onChange={e => setBaseForm({...baseForm, body: e.target.value})} />
+        {step === 1 && <button onClick={runPersonalization} disabled={loading} style={{ background: "#1d4ed8", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer" }}>{loading ? "Processing..." : "Generate Personalization ➔"}</button>}
+      </div>
+
+      {/* STEP 2: PERSONALIZED RESULT */}
+      {step >= 2 && (
+        <div style={{ background: "#111827", borderRadius: 12, padding: 24, border: step === 2 ? "1px solid #3b82f6" : "1px solid #1f2937", marginBottom: 16 }}>
+          <h3 style={{ marginTop: 0, color: "#60a5fa" }}>2. AI Personalized Output</h3>
+          <div style={{ color: "#d1d5db", fontSize: 14, marginBottom: 8 }}><strong>Subject:</strong> {personalized.subject}</div>
+          <div style={{ color: "#9ca3af", fontSize: 13, whiteSpace: "pre-wrap", background: "#0d1117", padding: 12, borderRadius: 8 }}>{personalized.body}</div>
+          {step === 2 && <button onClick={runABVariants} disabled={loading} style={{ marginTop: 12, background: "#1d4ed8", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer" }}>Generate A/B Variants ➔</button>}
+        </div>
+      )}
+
+      {/* STEP 3: A/B VARIANTS */}
+      {step >= 3 && (
+        <div style={{ background: "#111827", borderRadius: 12, padding: 24, border: step === 3 ? "1px solid #3b82f6" : "1px solid #1f2937", marginBottom: 16 }}>
+          <h3 style={{ marginTop: 0, color: "#60a5fa" }}>3. Select a Variant to Analyze</h3>
+          <div style={{ display: "grid", gap: 12 }}>
+            {variants.map((v, i) => (
+              <div key={i} onClick={() => step === 3 && runSpamCheck(v)} style={{ background: "#0d1117", padding: 16, borderRadius: 8, border: "1px solid #374151", cursor: step === 3 ? "pointer" : "default" }}>
+                <div style={{ color: "#60a5fa", fontSize: 12, fontWeight: "bold" }}>{v.angle}</div>
+                <div style={{ color: "#f9fafb", fontWeight: 600 }}>{v.subject}</div>
+                <div style={{ color: "#6b7280", fontSize: 12 }}>{v.rationale}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* STEP 4: SPAM CHECK & SAVE */}
+      {step >= 4 && spamScore && (
+        <div style={{ background: "#111827", borderRadius: 12, padding: 24, border: "1px solid #22c55e" }}>
+          <h3 style={{ marginTop: 0, color: "#22c55e" }}>4. Final Review & Save</h3>
+          <div style={{ fontSize: 18, color: spamScore.score > 5 ? "#f87171" : "#4ade80", marginBottom: 12 }}>Spam Score: {spamScore.score}/10</div>
+          
+          <input style={inputStyle} placeholder="Name this Campaign (e.g., Q3 Outreach)" value={campaignName} onChange={e => setCampaignName(e.target.value)} />
+          <button onClick={saveToDrafts} disabled={loading} style={{ background: "#22c55e", color: "#fff", padding: "12px 24px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>💾 Save as Draft Campaign</button>
+        </div>
+      )}
     </div>
   );
 }
