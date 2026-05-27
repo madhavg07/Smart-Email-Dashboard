@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models.database import get_db, Recipient, Campaign, SendLog
+from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent
 from typing import List
 
 router = APIRouter()
@@ -105,3 +105,18 @@ async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(g
         })
         
     return {"logs": report}
+
+@router.delete("/{campaign_id}")
+async def delete_campaign(campaign_id: str, db: Session = Depends(get_db)):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    
+    # Safely remove all associated tracking logs first to avoid database constraint errors
+    db.query(OpenEvent).filter(OpenEvent.campaign_id == campaign_id).delete()
+    db.query(ClickEvent).filter(ClickEvent.campaign_id == campaign_id).delete()
+    db.query(SendLog).filter(SendLog.campaign_id == campaign_id).delete()
+    
+    db.delete(campaign)
+    db.commit()
+    return {"status": "deleted"}

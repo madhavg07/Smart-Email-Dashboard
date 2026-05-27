@@ -8,17 +8,14 @@ router = APIRouter()
 
 @router.get("/overview")
 def analytics_overview(db: Session = Depends(get_db)):
+    # Safely handle empty databases to prevent NoneType crashes
     total_campaigns = db.query(Campaign).count() or 0
     total_recipients = db.query(Recipient).count() or 0
     suppressed = db.query(Recipient).filter(Recipient.is_suppressed == True).count() or 0
     
     total_sent = db.query(func.sum(Campaign.total_sent)).scalar() or 0
-    
-    total_opens = db.query(func.sum(SendLog.open_count)).scalar() or 0
-    total_clicks = db.query(func.sum(SendLog.click_count)).scalar() or 0
-    
-    unique_opens = db.query(SendLog).filter(SendLog.open_count > 0).count()
-    unique_clicks = db.query(SendLog).filter(SendLog.click_count > 0).count()
+    total_opens = db.query(OpenEvent).count() or 0
+    total_clicks = db.query(ClickEvent).count() or 0
     
     hot = db.query(Recipient).filter(Recipient.seriousness_score >= 0.75).count() or 0
     warm = db.query(Recipient).filter(Recipient.seriousness_score >= 0.50, Recipient.seriousness_score < 0.75).count() or 0
@@ -32,25 +29,42 @@ def analytics_overview(db: Session = Depends(get_db)):
         "total_emails_sent": total_sent,
         "total_opens": total_opens,
         "total_clicks": total_clicks,
-        "avg_open_rate": (unique_opens / total_sent * 100) if total_sent > 0 else 0,
-        "avg_click_rate": (unique_clicks / total_sent * 100) if total_sent > 0 else 0,
+        "avg_open_rate": (total_opens / total_sent * 100) if total_sent > 0 else 0,
+        "avg_click_rate": (total_clicks / total_sent * 100) if total_sent > 0 else 0,
         "engagement_breakdown": {"hot": hot, "warm": warm, "cold": cold, "inactive": inactive}
     }
-
 @router.get("/opens-over-time")
 def opens_over_time(db: Session = Depends(get_db)):
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-    events = db.query(OpenEvent).filter(OpenEvent.opened_at >= thirty_days_ago).all()
+    now = datetime.utcnow()
+    # Go exactly 30 days back from right now
+    thirty_days_ago = now - timedelta(days=30)
     
+    # Pre-fill the dictionary with exactly 31 days (30 days ago + TODAY)
     data_map = {}
-    for i in range(30):
+    for i in range(31):
         dt = (thirty_days_ago + timedelta(days=i)).strftime("%Y-%m-%d")
         data_map[dt] = 0
 
-    for e in events:
-        dt = e.opened_at.strftime("%Y-%m-%d")
-        if dt in data_map:
-            data_map[dt] += 1
+    # 1. Try reading from the detailed OpenEvent table first
+    events = db.query(OpenEvent).filter(OpenEvent.opened_at >= thirty_days_ago).all()
+    
+    if events:
+        for e in events:
+            if e.opened_at:
+                dt = e.opened_at.strftime("%Y-%m-%d")
+                if dt in data_map:
+                    data_map[dt] += 1
+    else:
+        # 2. FALLBACK: If OpenEvents is empty, read directly from the SendLogs 
+        # (This guarantees the graph matches the individual campaign reports)
+        logs = db.query(SendLog).filter(SendLog.first_opened_at >= thirty_days_ago).all()
+        for log in logs:
+            if log.first_opened_at:
+                dt = log.first_opened_at.strftime("%Y-%m-%d")
+                if dt in data_map:
+                    data_map[dt] += log.open_count
 
+    # Format perfectly for Recharts in the React frontend
     timeline = [{"date": k, "opens": v} for k, v in data_map.items()]
+    
     return {"timeline": timeline}
