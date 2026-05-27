@@ -35,7 +35,7 @@ export default function MailPulse() {
   };
 
   const loadData = useCallback(async () => {
-    if (!isAuthenticated) return; 
+    if (!isAuthenticated) return;
     setLoading(true);
     try {
       const [ov, cmp, rcp, tl, grp] = await Promise.all([
@@ -57,9 +57,9 @@ export default function MailPulse() {
     }
   }, [isAuthenticated]);
 
-  useEffect(() => { 
+  useEffect(() => {
     if (isAuthenticated) {
-      loadData(); 
+      loadData();
     }
   }, [isAuthenticated, loadData]);
 
@@ -170,12 +170,26 @@ function DashboardPage({ overview, timeline, pieData, campaigns }) {
     </div>
   );
 }
+
+function ModalOverlay({ title, onClose, children }) {
+  return (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
+      <div style={{ background: "#111827", padding: 24, borderRadius: 12, border: "1px solid #3b82f6", width: "100%", maxWidth: 650, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, borderBottom: "1px solid #1f2937", paddingBottom: 12 }}>
+          <h3 style={{ margin: 0, color: "#60a5fa", fontSize: 18 }}>{title}</h3>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#f87171", cursor: "pointer", fontSize: 20, fontWeight: "bold" }}>✕</button>
+        </div>
+        <div style={{ overflowY: "auto", flex: 1, paddingRight: 8 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
 function GroupsPage({ groups, recipients, onRefresh, showToast }) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [loading, setLoading] = useState(false);
+  const [viewGroup, setViewGroup] = useState(null); // Controls the Recipients Modal
 
-  // Safety fallback: if recipients is undefined, use an empty array
   const safeRecipients = recipients || [];
 
   const addGroup = async () => {
@@ -186,9 +200,7 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
       showToast("Group created successfully");
       setName(""); setDesc("");
       onRefresh();
-    } catch (e) {
-      showToast(e.message, "error");
-    }
+    } catch (e) { showToast(e.message, "error"); }
     setLoading(false);
   };
 
@@ -197,9 +209,7 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
       await api(`/groups/${id}`, { method: "DELETE" });
       showToast("Group deleted");
       onRefresh();
-    } catch (e) {
-      showToast(e.message, "error");
-    }
+    } catch (e) { showToast(e.message, "error"); }
   };
 
   const handleAddRecipient = async (groupId, recipientId) => {
@@ -208,14 +218,43 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
       await api(`/groups/${groupId}/add_recipient`, { method: "POST", body: JSON.stringify({ recipient_id: recipientId }) });
       showToast("Recipient added to group");
       onRefresh();
-    } catch (e) {
-      showToast(e.message, "error");
-    }
+    } catch (e) { showToast(e.message, "error"); }
   };
+
+  // Find recipients belonging to the currently viewed group
+  const groupMembers = viewGroup ? safeRecipients.filter(r => (r.metadata_?.group_ids || []).includes(viewGroup.id)) : [];
 
   return (
     <div>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>Recipient Groups</h1>
+
+      {viewGroup && (
+        <ModalOverlay title={`Members of "${viewGroup.name}"`} onClose={() => setViewGroup(null)}>
+          {groupMembers.length === 0 ? (
+            <div style={{ color: "#9ca3af", textAlign: "center", padding: 20 }}>No recipients in this group yet.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, color: "#d1d5db" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #374151", color: "#9ca3af" }}>
+                  <th style={{ textAlign: "left", padding: "8px 0" }}>Name</th>
+                  <th style={{ textAlign: "left", padding: "8px 0" }}>Email</th>
+                  <th style={{ textAlign: "left", padding: "8px 0" }}>Role</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groupMembers.map(r => (
+                  <tr key={r.id} style={{ borderBottom: "1px solid #1f2937" }}>
+                    <td style={{ padding: "10px 0", color: "#f9fafb" }}>{r.name || "—"}</td>
+                    <td style={{ padding: "10px 0" }}>{r.email}</td>
+                    <td style={{ padding: "10px 0" }}>{r.role || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </ModalOverlay>
+      )}
+
       <div style={{ background: "#111827", borderRadius: 12, border: "1px solid #1f2937", padding: 20, margin: "20px 0" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: 12 }}>
           <input value={name} onChange={e => setName(e.target.value)} placeholder="Group Name" style={{ padding: "10px", borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#fff", outline: "none" }} />
@@ -223,6 +262,7 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
           <button onClick={addGroup} disabled={loading} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Create Group</button>
         </div>
       </div>
+
       <div style={{ display: "grid", gap: 12 }}>
         {groups.map(g => (
           <div key={g.id} style={{ background: "#111827", padding: 16, borderRadius: 8, border: "1px solid #1f2937", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -231,13 +271,14 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
               <div style={{ fontSize: 12, color: "#9ca3af" }}>{g.description}</div>
             </div>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <select onChange={(e) => handleAddRecipient(g.id, e.target.value)} style={{ padding: "8px", borderRadius: 8, background: "#0d1117", border: "1px solid #374151", color: "#9ca3af", outline: "none" }}>
-                <option value="">+ Add Recipient</option>
+              <button onClick={() => setViewGroup(g)} style={{ background: "#1f2937", color: "#f9fafb", border: "1px solid #374151", padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>👥 View List</button>
+              <select onChange={(e) => { handleAddRecipient(g.id, e.target.value); e.target.value = ""; }} style={{ padding: "6px", borderRadius: 6, background: "#0d1117", border: "1px solid #374151", color: "#9ca3af", outline: "none", fontSize: 12 }}>
+                <option value="">+ Add Member</option>
                 {safeRecipients.filter(r => !(r.metadata_?.group_ids || []).includes(g.id)).map(r => (
                   <option key={r.id} value={r.id}>{r.email}</option>
                 ))}
               </select>
-              <button onClick={() => deleteGroup(g.id)} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer" }}>Delete</button>
+              <button onClick={() => deleteGroup(g.id)} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer", fontSize: 13 }}>Delete</button>
             </div>
           </div>
         ))}
@@ -246,12 +287,14 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
   );
 }
 
+
 function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [newRecipient, setNewRecipient] = useState({ email: "", name: "", role: "", industry: "", company: "", newGroupName: "" });
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [showGroupModal, setShowGroupModal] = useState(false); // Controls the Group Selection Modal
 
   const safeRecipients = recipients || [];
   const filtered = safeRecipients.filter(r => {
@@ -266,62 +309,70 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
     try {
       await api(`/recipients/${id}/suppress?suppress=${suppress}`, { method: "PATCH" });
       onRefresh();
-    } catch {}
+    } catch { }
   };
 
   const updateNewRecipient = (key, value) => setNewRecipient(curr => ({ ...curr, [key]: value }));
-
   const handleToggleGroup = (id) => setSelectedGroups(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
+  const initiateGroupSelection = () => {
+    if (!newRecipient.email) return showToast("Please enter an email address first", "error");
+    setShowGroupModal(true);
+  };
+
   const addRecipient = async () => {
-    if (!newRecipient.email) return showToast("Please enter email", "error");
     setSaving(true);
     try {
-      await api("/recipients/", { 
-        method: "POST", 
-        body: JSON.stringify({
-          ...newRecipient,
-          group_ids: selectedGroups,
-          new_group_name: newRecipient.newGroupName || null
-        }) 
+      await api("/recipients/", {
+        method: "POST",
+        body: JSON.stringify({ ...newRecipient, group_ids: selectedGroups, new_group_name: newRecipient.newGroupName || null })
       });
-      showToast("Recipient added");
+      showToast("Recipient added successfully");
       setNewRecipient({ email: "", name: "", role: "", industry: "", company: "", newGroupName: "" });
       setSelectedGroups([]);
+      setShowGroupModal(false);
       onRefresh();
-    } catch (e) {
-      showToast(e.message, "error");
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { showToast(e.message, "error"); }
+    finally { setSaving(false); }
   };
 
   return (
     <div>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>Recipients</h1>
-      <div style={{ background: "#111827", borderRadius: 12, border: "1px solid #1f2937", padding: 20, margin: "20px 0" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 14 }}>
-          {["email", "name", "role", "industry", "company"].map(key => (
-             <input key={key} value={newRecipient[key]} onChange={e => updateNewRecipient(key, e.target.value)} placeholder={key.charAt(0).toUpperCase() + key.slice(1)} style={{ width: "100%", padding: "10px", borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb", fontSize: 13, outline: "none" }} />
-          ))}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 14, background: "#0d1117", padding: 12, borderRadius: 8, border: "1px solid #1f2937" }}>
-          <div>
-            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8, fontWeight: "bold" }}>Select Existing Groups</div>
-            <div style={{ maxHeight: 80, overflow: "auto" }}>
-              {groups.map(g => (
-                <label key={g.id} style={{ display: "block", marginBottom: 4, color: "#d1d5db", fontSize: 13 }}>
-                  <input type="checkbox" checked={selectedGroups.includes(g.id)} onChange={() => handleToggleGroup(g.id)} style={{ marginRight: 8 }} /> {g.name}
-                </label>
-              ))}
+
+      {showGroupModal && (
+        <ModalOverlay title="Assign Recipient to Groups" onClose={() => setShowGroupModal(false)}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>Select Existing Groups</div>
+              <div style={{ maxHeight: 150, overflow: "auto", border: "1px solid #374151", padding: 12, borderRadius: 8, background: "#0d1117" }}>
+                {groups.length === 0 && <span style={{ color: "#6b7280", fontSize: 12 }}>No groups exist yet.</span>}
+                {groups.map(g => (
+                  <label key={g.id} style={{ display: "block", marginBottom: 8, color: "#d1d5db", fontSize: 13, cursor: "pointer" }}>
+                    <input type="checkbox" checked={selectedGroups.includes(g.id)} onChange={() => handleToggleGroup(g.id)} style={{ marginRight: 8, accentColor: "#3b82f6" }} /> {g.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>Or Create New Group</div>
+              <input value={newRecipient.newGroupName} onChange={e => updateNewRecipient("newGroupName", e.target.value)} placeholder="Type new group name..." style={{ width: "100%", padding: "10px", borderRadius: 8, background: "#0d1117", border: "1px solid #374151", color: "#f9fafb", fontSize: 13, outline: "none" }} />
+              <p style={{ fontSize: 11, color: "#6b7280", marginTop: 8 }}>This group will be created instantly and the recipient will be added to it.</p>
             </div>
           </div>
-          <div>
-            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8, fontWeight: "bold" }}>Or Create New Group</div>
-            <input value={newRecipient.newGroupName} onChange={e => updateNewRecipient("newGroupName", e.target.value)} placeholder="New Group Name..." style={{ width: "100%", padding: "8px", borderRadius: 8, background: "#111827", border: "1px solid #374151", color: "#f9fafb", fontSize: 13, outline: "none" }} />
-          </div>
+          <button onClick={addRecipient} disabled={saving} style={{ width: "100%", background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer" }}>
+            {saving ? "Saving..." : "Confirm & Add Recipient"}
+          </button>
+        </ModalOverlay>
+      )}
+
+      <div style={{ background: "#111827", borderRadius: 12, border: "1px solid #1f2937", padding: 20, margin: "20px 0" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 16 }}>
+          {["email", "name", "role", "industry", "company"].map(key => (
+            <input key={key} value={newRecipient[key]} onChange={e => updateNewRecipient(key, e.target.value)} placeholder={key.charAt(0).toUpperCase() + key.slice(1)} style={{ width: "100%", padding: "10px", borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb", fontSize: 13, outline: "none" }} />
+          ))}
         </div>
-        <button onClick={addRecipient} disabled={saving} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "12px 20px", fontSize: 14, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer" }}>Add recipient</button>
+        <button onClick={initiateGroupSelection} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "12px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Choose Groups & Save ➔</button>
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -348,9 +399,7 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
                     <div style={{ fontWeight: 500, color: "#e5e7eb" }}>{r.name || r.email}</div>
                     <div style={{ color: "#6b7280", fontSize: 12 }}>{r.email}</div>
                   </td>
-                  <td style={{ padding: "12px 16px", color: "#9ca3af", maxWidth: 150 }}>
-                    {rGroups.length > 0 ? rGroups.join(", ") : "—"}
-                  </td>
+                  <td style={{ padding: "12px 16px", color: "#9ca3af", maxWidth: 150 }}>{rGroups.length > 0 ? rGroups.join(", ") : "—"}</td>
                   <td style={{ padding: "12px 16px", color: scoreColor(r.seriousness_score || 0) }}>{scoreLabel(r.seriousness_score || 0)}</td>
                   <td style={{ padding: "12px 16px", color: "#9ca3af" }}>
                     <div style={{ color: "#4ade80" }}>{r.total_opens || 0} Opens</div>
@@ -371,6 +420,7 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
   );
 }
 
+
 function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) {
   const [reportData, setReportData] = useState(null);
   const [sendModal, setSendModal] = useState(null);
@@ -385,22 +435,23 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     } catch (e) { showToast("Failed to load report", "error"); }
   };
 
-  const handleToggleRec = (id) => setSelRecs(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  const handleToggleGrp = (id) => setSelGroups(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const deleteCampaign = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this campaign? This will also delete its tracking data.")) return;
+    try {
+      await api(`/campaigns/${id}`, { method: "DELETE" });
+      showToast("Campaign deleted successfully");
+      onRefresh();
+    } catch (e) { showToast(e.message, "error"); }
+  };
 
   const executeSend = async () => {
     setSending(true);
     try {
-      await api(`/campaigns/${sendModal}/send`, { 
-        method: "POST", 
-        body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: true }) 
-      });
+      await api(`/campaigns/${sendModal}/send`, { method: "POST", body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: true }) });
       showToast("Campaign queued for sending!");
       setSendModal(null);
       onRefresh();
-    } catch (e) {
-      showToast(e.message, "error");
-    }
+    } catch (e) { showToast(e.message, "error"); }
     setSending(false);
   };
 
@@ -409,78 +460,82 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
       <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb" }}>Campaigns</h1>
 
       {reportData && (
-        <div style={{ background: "#111827", padding: 24, borderRadius: 12, border: "1px solid #3b82f6", marginBottom: 24 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <h3 style={{ color: "#60a5fa", marginTop: 0 }}>Tracking Report</h3>
-            <button onClick={() => setReportData(null)} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer" }}>Close X</button>
-          </div>
-          <table style={{ width: "100%", textAlign: "left", color: "#d1d5db", fontSize: 13 }}>
-            <thead><tr><th>Recipient</th><th>Variant</th><th>Opens</th><th>Clicks</th></tr></thead>
+        <ModalOverlay title="Detailed Tracking Report" onClose={() => setReportData(null)}>
+          <table style={{ width: "100%", textAlign: "left", color: "#d1d5db", fontSize: 13, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ color: "#9ca3af", borderBottom: "1px solid #374151" }}>
+                <th style={{ padding: "8px 0" }}>Recipient</th>
+                <th style={{ padding: "8px 0" }}>Variant</th>
+                <th style={{ padding: "8px 0" }}>Opens</th>
+                <th style={{ padding: "8px 0" }}>Clicks</th>
+              </tr>
+            </thead>
             <tbody>
               {reportData.map((log, i) => (
-                <tr key={i} style={{ borderTop: "1px solid #1f2937" }}>
-                  <td style={{ padding: "8px 0" }}>{log.email}</td>
-                  <td>{log.variant}</td>
-                  <td style={{ color: log.opens > 0 ? "#4ade80" : "#9ca3af" }}>{log.opens}</td>
-                  <td>{log.clicks}</td>
+                <tr key={i} style={{ borderBottom: "1px solid #1f2937" }}>
+                  <td style={{ padding: "10px 0", color: "#f9fafb" }}>{log.email}</td>
+                  <td style={{ padding: "10px 0" }}>{log.variant}</td>
+                  <td style={{ padding: "10px 0", color: log.opens > 0 ? "#4ade80" : "#9ca3af", fontWeight: log.opens > 0 ? "bold" : "normal" }}>{log.opens}</td>
+                  <td style={{ padding: "10px 0", color: log.clicks > 0 ? "#a78bfa" : "#9ca3af", fontWeight: log.clicks > 0 ? "bold" : "normal" }}>{log.clicks}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </ModalOverlay>
       )}
 
       {sendModal && (
-        <div style={{ background: "#111827", padding: 24, borderRadius: 12, border: "1px solid #3b82f6", marginBottom: 24 }}>
-          <h3 style={{ color: "#60a5fa", marginTop: 0 }}>Target Audience Selection</h3>
+        <ModalOverlay title="Target Audience Selection" onClose={() => setSendModal(null)}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
             <div>
-              <h4 style={{ color: "#d1d5db" }}>Select Groups</h4>
-              <div style={{ maxHeight: 150, overflow: "auto", border: "1px solid #1f2937", padding: 8, borderRadius: 8 }}>
+              <h4 style={{ color: "#d1d5db", marginTop: 0 }}>Select Groups</h4>
+              <div style={{ maxHeight: 200, overflow: "auto", border: "1px solid #1f2937", padding: 12, borderRadius: 8, background: "#0d1117" }}>
                 {groups.map(g => (
-                  <label key={g.id} style={{ display: "block", marginBottom: 6, color: "#9ca3af", fontSize: 13 }}>
-                    <input type="checkbox" checked={selGroups.includes(g.id)} onChange={() => handleToggleGrp(g.id)} /> {g.name}
+                  <label key={g.id} style={{ display: "block", marginBottom: 8, color: "#9ca3af", fontSize: 13, cursor: "pointer" }}>
+                    <input type="checkbox" checked={selGroups.includes(g.id)} onChange={() => setSelGroups(p => p.includes(g.id) ? p.filter(x => x !== g.id) : [...p, g.id])} style={{ marginRight: 8, accentColor: "#3b82f6" }} /> {g.name}
                   </label>
                 ))}
               </div>
             </div>
             <div>
-              <h4 style={{ color: "#d1d5db" }}>Select Specific Recipients</h4>
-              <div style={{ maxHeight: 150, overflow: "auto", border: "1px solid #1f2937", padding: 8, borderRadius: 8 }}>
+              <h4 style={{ color: "#d1d5db", marginTop: 0 }}>Select Specific Recipients</h4>
+              <div style={{ maxHeight: 200, overflow: "auto", border: "1px solid #1f2937", padding: 12, borderRadius: 8, background: "#0d1117" }}>
                 {recipients.filter(r => !r.is_suppressed).map(r => (
-                  <label key={r.id} style={{ display: "block", marginBottom: 6, color: "#9ca3af", fontSize: 13 }}>
-                    <input type="checkbox" checked={selRecs.includes(r.id)} onChange={() => handleToggleRec(r.id)} /> {r.email}
+                  <label key={r.id} style={{ display: "block", marginBottom: 8, color: "#9ca3af", fontSize: 13, cursor: "pointer" }}>
+                    <input type="checkbox" checked={selRecs.includes(r.id)} onChange={() => setSelRecs(p => p.includes(r.id) ? p.filter(x => x !== r.id) : [...p, r.id])} style={{ marginRight: 8, accentColor: "#3b82f6" }} /> {r.email}
                   </label>
                 ))}
               </div>
             </div>
           </div>
-          <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-            <button onClick={executeSend} disabled={sending} style={{ background: "#22c55e", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, cursor: "pointer" }}>Confirm & Send</button>
-            <button onClick={() => setSendModal(null)} style={{ background: "transparent", color: "#9ca3af", border: "none", cursor: "pointer" }}>Cancel</button>
-          </div>
-        </div>
+          <button onClick={executeSend} disabled={sending} style={{ marginTop: 20, width: "100%", background: "#22c55e", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
+            {sending ? "Processing..." : "Confirm & Send Campaign"}
+          </button>
+        </ModalOverlay>
       )}
 
-      <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
         {campaigns.map(c => (
           <div key={c.id} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", gap: 20 }}>
             <div style={{ flex: 1 }}>
-              <span style={{ fontWeight: 600, color: "#f9fafb" }}>{c.name}</span>
-              <div style={{ color: "#9ca3af", fontSize: 13 }}>{c.subject}</div>
+              <span style={{ fontWeight: 600, color: "#f9fafb", fontSize: 16 }}>{c.name}</span>
+              <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 4 }}>{c.subject}</div>
             </div>
-            
-            <div style={{ textAlign: "right", marginRight: 20 }}>
+
+            <div style={{ textAlign: "right", marginRight: 20, minWidth: 120 }}>
               <div style={{ fontSize: 13, color: "#d1d5db", fontWeight: "bold" }}>Sent: {c.total_sent || 0}</div>
               <div style={{ fontSize: 12, color: "#4ade80" }}>Open Rate: {pct(c.open_rate)}</div>
               <div style={{ fontSize: 12, color: "#a78bfa" }}>Click Rate: {pct(c.click_rate)}</div>
             </div>
 
-            {c.status === "sent" || c.status === "sending" ? (
-              <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer" }}>📊 View Report</button>
-            ) : (
-              <button onClick={() => { setSelRecs([]); setSelGroups([]); setSendModal(c.id); }} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer" }}>Send Now ▶</button>
-            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              {c.status === "sent" || c.status === "sending" ? (
+                <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>📊 Report</button>
+              ) : (
+                <button onClick={() => { setSelRecs([]); setSelGroups([]); setSendModal(c.id); }} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>Send Now ▶</button>
+              )}
+              <button onClick={() => deleteCampaign(c.id)} style={{ background: "transparent", color: "#f87171", border: "1px solid #7f1d1d", borderRadius: 8, padding: "8px 12px", cursor: "pointer" }}>🗑️</button>
+            </div>
           </div>
         ))}
       </div>
@@ -491,9 +546,9 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
 function UnifiedAIFlowPage({ showToast, onRefresh }) {
   const [loading, setLoading] = useState(false);
   const [campaignName, setCampaignName] = useState("");
-  
+
   const [baseForm, setBaseForm] = useState({ subject: "", body: "", name: "Alex", role: "Manager", company: "TechCorp", industry: "Software" });
-  
+
   const [personalized, setPersonalized] = useState(null);
   const [variants, setVariants] = useState([]);
   const [selectedVariant, setSelectedVariant] = useState(null);
@@ -537,12 +592,14 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
     if (!campaignName) return showToast("Provide a campaign name first", "error");
     setLoading(true);
     try {
-      await api("/campaigns/", { method: "POST", body: JSON.stringify({ 
-        name: campaignName, 
-        subject: selectedVariant.subject, 
-        body_html: personalized ? personalized.body : baseForm.body, 
-        ab_variants: variants 
-      })});
+      await api("/campaigns/", {
+        method: "POST", body: JSON.stringify({
+          name: campaignName,
+          subject: selectedVariant.subject,
+          body_html: personalized ? personalized.body : baseForm.body,
+          ab_variants: variants
+        })
+      });
       showToast("Saved to Drafts!");
       onRefresh();
       setBaseForm({ subject: "", body: "", name: "Alex", role: "Manager", company: "TechCorp", industry: "Software" });
@@ -573,11 +630,11 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
       <div style={sectionStyle(true)}>
         <h3 style={{ marginTop: 0, color: "#60a5fa" }}>1. Base Context</h3>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <input style={inputStyle} placeholder="Target Persona Name" value={baseForm.name} onChange={e => setBaseForm({...baseForm, name: e.target.value})} />
-          <input style={inputStyle} placeholder="Role (e.g., CEO)" value={baseForm.role} onChange={e => setBaseForm({...baseForm, role: e.target.value})} />
+          <input style={inputStyle} placeholder="Target Persona Name" value={baseForm.name} onChange={e => setBaseForm({ ...baseForm, name: e.target.value })} />
+          <input style={inputStyle} placeholder="Role (e.g., CEO)" value={baseForm.role} onChange={e => setBaseForm({ ...baseForm, role: e.target.value })} />
         </div>
-        <input style={inputStyle} placeholder="Base Subject" value={baseForm.subject} onChange={e => setBaseForm({...baseForm, subject: e.target.value})} />
-        <textarea style={{...inputStyle, minHeight: 100}} placeholder="Base Body..." value={baseForm.body} onChange={e => setBaseForm({...baseForm, body: e.target.value})} />
+        <input style={inputStyle} placeholder="Base Subject" value={baseForm.subject} onChange={e => setBaseForm({ ...baseForm, subject: e.target.value })} />
+        <textarea style={{ ...inputStyle, minHeight: 100 }} placeholder="Base Body..." value={baseForm.body} onChange={e => setBaseForm({ ...baseForm, body: e.target.value })} />
         <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
           <button onClick={runPersonalization} disabled={loading || !baseForm.subject || !baseForm.body} style={{ background: "#1d4ed8", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer" }}>1a. Personalize Context</button>
           <button onClick={runABVariants} disabled={loading || !baseForm.subject || !baseForm.body} style={{ background: "#374151", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer" }}>1b. Skip directly to A/B Variants</button>
@@ -595,15 +652,15 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
         <h3 style={{ marginTop: 0, color: "#60a5fa" }}>3. Select a Variant to Analyze</h3>
         <div style={{ display: "grid", gap: 12 }}>
           {variants.map((v, i) => (
-            <div 
-              key={i} 
+            <div
+              key={i}
               onMouseEnter={() => setHoveredVariant(i)}
               onMouseLeave={() => setHoveredVariant(null)}
-              onClick={() => runSpamCheck(v)} 
-              style={{ 
-                background: selectedVariant === v ? "#1e3a8a" : hoveredVariant === i ? "#1f2937" : "#0d1117", 
-                padding: 16, borderRadius: 8, 
-                border: selectedVariant === v ? "1px solid #60a5fa" : "1px solid #374151", 
+              onClick={() => runSpamCheck(v)}
+              style={{
+                background: selectedVariant === v ? "#1e3a8a" : hoveredVariant === i ? "#1f2937" : "#0d1117",
+                padding: 16, borderRadius: 8,
+                border: selectedVariant === v ? "1px solid #60a5fa" : "1px solid #374151",
                 cursor: "pointer",
                 transition: "all 0.2s"
               }}
