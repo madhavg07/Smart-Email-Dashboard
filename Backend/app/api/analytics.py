@@ -13,8 +13,12 @@ def analytics_overview(db: Session = Depends(get_db)):
     suppressed = db.query(Recipient).filter(Recipient.is_suppressed == True).count() or 0
     
     total_sent = db.query(func.sum(Campaign.total_sent)).scalar() or 0
-    total_opens = db.query(OpenEvent).count() or 0
-    total_clicks = db.query(ClickEvent).count() or 0
+    
+    total_opens = db.query(func.sum(SendLog.open_count)).scalar() or 0
+    total_clicks = db.query(func.sum(SendLog.click_count)).scalar() or 0
+    
+    unique_opens = db.query(SendLog).filter(SendLog.open_count > 0).count()
+    unique_clicks = db.query(SendLog).filter(SendLog.click_count > 0).count()
     
     hot = db.query(Recipient).filter(Recipient.seriousness_score >= 0.75).count() or 0
     warm = db.query(Recipient).filter(Recipient.seriousness_score >= 0.50, Recipient.seriousness_score < 0.75).count() or 0
@@ -28,8 +32,8 @@ def analytics_overview(db: Session = Depends(get_db)):
         "total_emails_sent": total_sent,
         "total_opens": total_opens,
         "total_clicks": total_clicks,
-        "avg_open_rate": (total_opens / total_sent * 100) if total_sent > 0 else 0,
-        "avg_click_rate": (total_clicks / total_sent * 100) if total_sent > 0 else 0,
+        "avg_open_rate": (unique_opens / total_sent * 100) if total_sent > 0 else 0,
+        "avg_click_rate": (unique_clicks / total_sent * 100) if total_sent > 0 else 0,
         "engagement_breakdown": {"hot": hot, "warm": warm, "cold": cold, "inactive": inactive}
     }
 

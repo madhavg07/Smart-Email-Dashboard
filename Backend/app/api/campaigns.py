@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent
+from sqlalchemy import func
+from app.models.database import get_db, Recipient, Campaign, SendLog
 from typing import List
 
 router = APIRouter()
@@ -16,10 +17,14 @@ class CampaignCreate(BaseModel):
 async def list_campaigns(db: Session = Depends(get_db)):
     campaigns = db.query(Campaign).all()
     for c in campaigns:
-        c.total_opens = db.query(OpenEvent).filter(OpenEvent.campaign_id == c.id).count()
-        c.total_clicks = db.query(ClickEvent).filter(ClickEvent.campaign_id == c.id).count()
-        c.open_rate = (c.total_opens / c.total_sent * 100) if c.total_sent > 0 else 0.0
-        c.click_rate = (c.total_clicks / c.total_sent * 100) if c.total_sent > 0 else 0.0
+        c.total_opens = db.query(func.sum(SendLog.open_count)).filter(SendLog.campaign_id == c.id).scalar() or 0
+        c.total_clicks = db.query(func.sum(SendLog.click_count)).filter(SendLog.campaign_id == c.id).scalar() or 0
+        
+        unique_opens = db.query(SendLog).filter(SendLog.campaign_id == c.id, SendLog.open_count > 0).count()
+        unique_clicks = db.query(SendLog).filter(SendLog.campaign_id == c.id, SendLog.click_count > 0).count()
+        
+        c.open_rate = (unique_opens / c.total_sent * 100) if c.total_sent > 0 else 0.0
+        c.click_rate = (unique_clicks / c.total_sent * 100) if c.total_sent > 0 else 0.0
     return campaigns
 
 @router.post("/")
