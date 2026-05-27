@@ -106,7 +106,7 @@ export default function MailPulse() {
         {page === "dashboard" && <DashboardPage overview={overview} timeline={timeline} pieData={pieData} campaigns={campaigns} />}
         {page === "campaigns" && <CampaignsPage campaigns={campaigns} recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
         {page === "recipients" && <RecipientsPage recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
-        {page === "groups" && <GroupsPage groups={groups} onRefresh={loadData} showToast={showToast} />}
+        {page === "groups" && <GroupsPage groups={groups} recipients={recipients} onRefresh={loadData} showToast={showToast} />}
         {page === "compose" && <UnifiedAIFlowPage showToast={showToast} onRefresh={loadData} />}
       </main>
     </div>
@@ -175,6 +175,9 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
   const [desc, setDesc] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Safety fallback: if recipients is undefined, use an empty array
+  const safeRecipients = recipients || [];
+
   const addGroup = async () => {
     if (!name) return showToast("Group name required", "error");
     setLoading(true);
@@ -230,7 +233,7 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <select onChange={(e) => handleAddRecipient(g.id, e.target.value)} style={{ padding: "8px", borderRadius: 8, background: "#0d1117", border: "1px solid #374151", color: "#9ca3af", outline: "none" }}>
                 <option value="">+ Add Recipient</option>
-                {recipients.filter(r => !(r.metadata_?.group_ids || []).includes(g.id)).map(r => (
+                {safeRecipients.filter(r => !(r.metadata_?.group_ids || []).includes(g.id)).map(r => (
                   <option key={r.id} value={r.id}>{r.email}</option>
                 ))}
               </select>
