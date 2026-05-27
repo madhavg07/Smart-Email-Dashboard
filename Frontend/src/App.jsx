@@ -170,8 +170,7 @@ function DashboardPage({ overview, timeline, pieData, campaigns }) {
     </div>
   );
 }
-
-function GroupsPage({ groups, onRefresh, showToast }) {
+function GroupsPage({ groups, recipients, onRefresh, showToast }) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [loading, setLoading] = useState(false);
@@ -200,6 +199,17 @@ function GroupsPage({ groups, onRefresh, showToast }) {
     }
   };
 
+  const handleAddRecipient = async (groupId, recipientId) => {
+    if (!recipientId) return;
+    try {
+      await api(`/groups/${groupId}/add_recipient`, { method: "POST", body: JSON.stringify({ recipient_id: recipientId }) });
+      showToast("Recipient added to group");
+      onRefresh();
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+  };
+
   return (
     <div>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>Recipient Groups</h1>
@@ -212,12 +222,20 @@ function GroupsPage({ groups, onRefresh, showToast }) {
       </div>
       <div style={{ display: "grid", gap: 12 }}>
         {groups.map(g => (
-          <div key={g.id} style={{ background: "#111827", padding: 16, borderRadius: 8, border: "1px solid #1f2937", display: "flex", justifyContent: "space-between" }}>
+          <div key={g.id} style={{ background: "#111827", padding: 16, borderRadius: 8, border: "1px solid #1f2937", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div style={{ fontWeight: "bold", color: "#60a5fa" }}>{g.name}</div>
               <div style={{ fontSize: 12, color: "#9ca3af" }}>{g.description}</div>
             </div>
-            <button onClick={() => deleteGroup(g.id)} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer" }}>Delete</button>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <select onChange={(e) => handleAddRecipient(g.id, e.target.value)} style={{ padding: "8px", borderRadius: 8, background: "#0d1117", border: "1px solid #374151", color: "#9ca3af", outline: "none" }}>
+                <option value="">+ Add Recipient</option>
+                {recipients.filter(r => !(r.metadata_?.group_ids || []).includes(g.id)).map(r => (
+                  <option key={r.id} value={r.id}>{r.email}</option>
+                ))}
+              </select>
+              <button onClick={() => deleteGroup(g.id)} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer" }}>Delete</button>
+            </div>
           </div>
         ))}
       </div>
@@ -228,7 +246,8 @@ function GroupsPage({ groups, onRefresh, showToast }) {
 function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [newRecipient, setNewRecipient] = useState({ email: "", name: "", role: "", industry: "", company: "", group_id: "" });
+  const [newRecipient, setNewRecipient] = useState({ email: "", name: "", role: "", industry: "", company: "", newGroupName: "" });
+  const [selectedGroups, setSelectedGroups] = useState([]);
   const [saving, setSaving] = useState(false);
 
   const safeRecipients = recipients || [];
@@ -249,13 +268,23 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
 
   const updateNewRecipient = (key, value) => setNewRecipient(curr => ({ ...curr, [key]: value }));
 
+  const handleToggleGroup = (id) => setSelectedGroups(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
   const addRecipient = async () => {
     if (!newRecipient.email) return showToast("Please enter email", "error");
     setSaving(true);
     try {
-      await api("/recipients/", { method: "POST", body: JSON.stringify(newRecipient) });
+      await api("/recipients/", { 
+        method: "POST", 
+        body: JSON.stringify({
+          ...newRecipient,
+          group_ids: selectedGroups,
+          new_group_name: newRecipient.newGroupName || null
+        }) 
+      });
       showToast("Recipient added");
-      setNewRecipient({ email: "", name: "", role: "", industry: "", company: "", group_id: "" });
+      setNewRecipient({ email: "", name: "", role: "", industry: "", company: "", newGroupName: "" });
+      setSelectedGroups([]);
       onRefresh();
     } catch (e) {
       showToast(e.message, "error");
@@ -268,14 +297,26 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
     <div>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>Recipients</h1>
       <div style={{ background: "#111827", borderRadius: 12, border: "1px solid #1f2937", padding: 20, margin: "20px 0" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12, marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 14 }}>
           {["email", "name", "role", "industry", "company"].map(key => (
              <input key={key} value={newRecipient[key]} onChange={e => updateNewRecipient(key, e.target.value)} placeholder={key.charAt(0).toUpperCase() + key.slice(1)} style={{ width: "100%", padding: "10px", borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb", fontSize: 13, outline: "none" }} />
           ))}
-          <select value={newRecipient.group_id} onChange={e => updateNewRecipient("group_id", e.target.value)} style={{ padding: "10px", borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#9ca3af", outline: "none" }}>
-            <option value="">No Group</option>
-            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 14, background: "#0d1117", padding: 12, borderRadius: 8, border: "1px solid #1f2937" }}>
+          <div>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8, fontWeight: "bold" }}>Select Existing Groups</div>
+            <div style={{ maxHeight: 80, overflow: "auto" }}>
+              {groups.map(g => (
+                <label key={g.id} style={{ display: "block", marginBottom: 4, color: "#d1d5db", fontSize: 13 }}>
+                  <input type="checkbox" checked={selectedGroups.includes(g.id)} onChange={() => handleToggleGroup(g.id)} style={{ marginRight: 8 }} /> {g.name}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8, fontWeight: "bold" }}>Or Create New Group</div>
+            <input value={newRecipient.newGroupName} onChange={e => updateNewRecipient("newGroupName", e.target.value)} placeholder="New Group Name..." style={{ width: "100%", padding: "8px", borderRadius: 8, background: "#111827", border: "1px solid #374151", color: "#f9fafb", fontSize: 13, outline: "none" }} />
+          </div>
         </div>
         <button onClick={addRecipient} disabled={saving} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "12px 20px", fontSize: 14, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer" }}>Add recipient</button>
       </div>
@@ -292,25 +333,34 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: "#0d1117", color: "#6b7280", borderBottom: "1px solid #1f2937" }}>
-              {["Recipient", "Role", "Score", "Action"].map(h => <th key={h} style={{ textAlign: "left", padding: "10px 16px" }}>{h}</th>)}
+              {["Recipient", "Groups", "Engagement", "Stats", "Action"].map(h => <th key={h} style={{ textAlign: "left", padding: "10px 16px" }}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {filtered.map(r => (
-              <tr key={r.id} style={{ borderBottom: "1px solid #0f172a", opacity: r.is_suppressed ? 0.5 : 1 }}>
-                <td style={{ padding: "12px 16px" }}>
-                  <div style={{ fontWeight: 500, color: "#e5e7eb" }}>{r.name || r.email}</div>
-                  <div style={{ color: "#6b7280", fontSize: 12 }}>{r.email}</div>
-                </td>
-                <td style={{ padding: "12px 16px", color: "#9ca3af" }}>{r.role || "—"}</td>
-                <td style={{ padding: "12px 16px", color: scoreColor(r.seriousness_score || 0) }}>{scoreLabel(r.seriousness_score || 0)}</td>
-                <td style={{ padding: "12px 16px" }}>
-                  <button onClick={() => toggleSuppress(r.id, !r.is_suppressed)} style={{ padding: "4px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", background: r.is_suppressed ? "#14532d" : "#7f1d1d", color: r.is_suppressed ? "#86efac" : "#fca5a5", border: "none" }}>
-                    {r.is_suppressed ? "Restore" : "Suppress"}
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {filtered.map(r => {
+              const rGroups = (r.metadata_?.group_ids || []).map(id => groups.find(g => g.id === id)?.name).filter(Boolean);
+              return (
+                <tr key={r.id} style={{ borderBottom: "1px solid #0f172a", opacity: r.is_suppressed ? 0.5 : 1 }}>
+                  <td style={{ padding: "12px 16px" }}>
+                    <div style={{ fontWeight: 500, color: "#e5e7eb" }}>{r.name || r.email}</div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>{r.email}</div>
+                  </td>
+                  <td style={{ padding: "12px 16px", color: "#9ca3af", maxWidth: 150 }}>
+                    {rGroups.length > 0 ? rGroups.join(", ") : "—"}
+                  </td>
+                  <td style={{ padding: "12px 16px", color: scoreColor(r.seriousness_score || 0) }}>{scoreLabel(r.seriousness_score || 0)}</td>
+                  <td style={{ padding: "12px 16px", color: "#9ca3af" }}>
+                    <div style={{ color: "#4ade80" }}>{r.total_opens || 0} Opens</div>
+                    <div style={{ color: "#a78bfa" }}>{r.total_clicks || 0} Clicks</div>
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <button onClick={() => toggleSuppress(r.id, !r.is_suppressed)} style={{ padding: "4px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", background: r.is_suppressed ? "#14532d" : "#7f1d1d", color: r.is_suppressed ? "#86efac" : "#fca5a5", border: "none" }}>
+                      {r.is_suppressed ? "Restore" : "Suppress"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -416,6 +466,13 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
               <span style={{ fontWeight: 600, color: "#f9fafb" }}>{c.name}</span>
               <div style={{ color: "#9ca3af", fontSize: 13 }}>{c.subject}</div>
             </div>
+            
+            <div style={{ textAlign: "right", marginRight: 20 }}>
+              <div style={{ fontSize: 13, color: "#d1d5db", fontWeight: "bold" }}>Sent: {c.total_sent || 0}</div>
+              <div style={{ fontSize: 12, color: "#4ade80" }}>Open Rate: {pct(c.open_rate)}</div>
+              <div style={{ fontSize: 12, color: "#a78bfa" }}>Click Rate: {pct(c.click_rate)}</div>
+            </div>
+
             {c.status === "sent" || c.status === "sending" ? (
               <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer" }}>📊 View Report</button>
             ) : (
