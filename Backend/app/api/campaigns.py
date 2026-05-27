@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from app.models.database import get_db, Recipient, Campaign, SendLog
+from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent
 from typing import List
 
 router = APIRouter()
@@ -14,7 +14,13 @@ class CampaignCreate(BaseModel):
 
 @router.get("/")
 async def list_campaigns(db: Session = Depends(get_db)):
-    return db.query(Campaign).all()
+    campaigns = db.query(Campaign).all()
+    for c in campaigns:
+        c.total_opens = db.query(OpenEvent).filter(OpenEvent.campaign_id == c.id).count()
+        c.total_clicks = db.query(ClickEvent).filter(ClickEvent.campaign_id == c.id).count()
+        c.open_rate = (c.total_opens / c.total_sent * 100) if c.total_sent > 0 else 0.0
+        c.click_rate = (c.total_clicks / c.total_sent * 100) if c.total_sent > 0 else 0.0
+    return campaigns
 
 @router.post("/")
 async def create_campaign(campaign: CampaignCreate, db: Session = Depends(get_db)):
@@ -53,7 +59,9 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
         if payload.group_ids:
             all_recs = db.query(Recipient).filter(Recipient.is_suppressed == False).all()
             for r in all_recs:
-                if r.metadata_ and r.metadata_.get("group_id") in payload.group_ids:
+                meta = r.metadata_ or {}
+                r_groups = meta.get("group_ids", [])
+                if any(gid in r_groups for gid in payload.group_ids):
                     final_recipient_ids.add(r.id)
                     
         if not payload.recipient_ids and not payload.group_ids:

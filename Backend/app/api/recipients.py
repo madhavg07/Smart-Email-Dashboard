@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db, Recipient
+from app.models.database import get_db, Recipient,Group, OpenEvent, ClickEvent
 
 import csv
 import io
@@ -20,11 +20,16 @@ class RecipientCreate(BaseModel):
     role: str | None = None
     industry: str | None = None
     company: str | None = None
-    group_id: str | None = None
+    group_ids: list[str] | None = []
+    new_group_name: str | None = None
 
 @router.get("/")
 def list_recipients(db: Session = Depends(get_db)):
-    return db.query(Recipient).all()
+    recs = db.query(Recipient).all()
+    for r in recs:
+        r.total_opens = db.query(OpenEvent).filter(OpenEvent.recipient_id == r.id).count()
+        r.total_clicks = db.query(ClickEvent).filter(ClickEvent.recipient_id == r.id).count()
+    return recs
 
 @router.post("/")
 def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db)):
@@ -32,9 +37,17 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="Recipient already exists")
 
-    metadata_dict = {}
-    if payload.group_id:
-        metadata_dict["group_id"] = payload.group_id
+    final_group_ids = payload.group_ids or []
+
+    if payload.new_group_name:
+        existing_group = db.query(Group).filter(Group.name == payload.new_group_name).first()
+        if not existing_group:
+            new_group = Group(name=payload.new_group_name, description="Auto-created")
+            db.add(new_group)
+            db.flush()
+            final_group_ids.append(new_group.id)
+        else:
+            final_group_ids.append(existing_group.id)
 
     r = Recipient(
         email=payload.email,
@@ -42,7 +55,7 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db)):
         role=payload.role,
         industry=payload.industry,
         company=payload.company,
-        metadata_=metadata_dict
+        metadata_={"group_ids": final_group_ids}
     )
     db.add(r)
     db.commit()

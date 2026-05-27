@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from datetime import datetime, timedelta
 from app.models.database import get_db, Campaign, Recipient, SendLog, OpenEvent, ClickEvent
 
 router = APIRouter()
 
 @router.get("/overview")
 def analytics_overview(db: Session = Depends(get_db)):
-    # Safely handle empty databases to prevent NoneType crashes
     total_campaigns = db.query(Campaign).count() or 0
     total_recipients = db.query(Recipient).count() or 0
     suppressed = db.query(Recipient).filter(Recipient.is_suppressed == True).count() or 0
@@ -32,13 +32,21 @@ def analytics_overview(db: Session = Depends(get_db)):
         "avg_click_rate": (total_clicks / total_sent * 100) if total_sent > 0 else 0,
         "engagement_breakdown": {"hot": hot, "warm": warm, "cold": cold, "inactive": inactive}
     }
+
 @router.get("/opens-over-time")
 def opens_over_time(db: Session = Depends(get_db)):
-    # Fallback mock data to keep the chart looking good for the demo!
-    return [
-        {"date": "2026-05-18", "opens": 12}, 
-        {"date": "2026-05-19", "opens": 45},
-        {"date": "2026-05-20", "opens": 23}, 
-        {"date": "2026-05-21", "opens": 78},
-        {"date": "2026-05-22", "opens": 56}
-    ]
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    events = db.query(OpenEvent).filter(OpenEvent.opened_at >= thirty_days_ago).all()
+    
+    data_map = {}
+    for i in range(30):
+        dt = (thirty_days_ago + timedelta(days=i)).strftime("%Y-%m-%d")
+        data_map[dt] = 0
+
+    for e in events:
+        dt = e.opened_at.strftime("%Y-%m-%d")
+        if dt in data_map:
+            data_map[dt] += 1
+
+    timeline = [{"date": k, "opens": v} for k, v in data_map.items()]
+    return {"timeline": timeline}
