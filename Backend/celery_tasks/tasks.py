@@ -81,15 +81,23 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
 
                 # Tracking Pixel & Links
                 tracking_token = str(uuid.uuid4())
+                
+                # THREAD-BUSTER FIX: Add invisible zero-width spaces to trick Gmail
+                # This ensures every email is treated as a separate conversation!
+                invisible_spaces = '\u200B' * (sent_count + 1)
+                unique_subject = subject + invisible_spaces
+
                 send_log = SendLog(
                     campaign_id=campaign_id, recipient_id=recipient.id,
-                    tracking_token=tracking_token, personalized_subject=subject,
+                    tracking_token=tracking_token, 
+                    personalized_subject=unique_subject, # Using the unique subject!
                     personalized_body=body_html, sent_at=datetime.utcnow()
                 )
                 db.add(send_log)
                 db.flush() 
 
-                full_html = build_html_email(body_html, subject, recipient.name or "")
+                # Ensure build_html_email and send_single_email also use unique_subject
+                full_html = build_html_email(body_html, unique_subject, recipient.name or "")
                 full_html = rewrite_links(full_html, send_log.id, recipient.id, campaign_id, db)
                 full_html = inject_tracking_pixel(full_html, tracking_token)
                 db.commit()
@@ -97,8 +105,9 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
                 # Send Email
                 success = asyncio.run(send_single_email(
                     to_email=recipient.email, to_name=recipient.name or recipient.email,
-                    subject=subject, html_body=full_html
+                    subject=unique_subject, html_body=full_html
                 ))
+                # ...
                 if success:
                     sent_count += 1
                     recipient.total_emails_received += 1

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db, Recipient,Group, OpenEvent, ClickEvent
+from app.models.database import SendLog, get_db, Recipient,Group, OpenEvent, ClickEvent
 
 import csv
 import io
@@ -27,8 +27,8 @@ class RecipientCreate(BaseModel):
 def list_recipients(db: Session = Depends(get_db)):
     recs = db.query(Recipient).all()
     for r in recs:
-        r.total_opens = db.query(OpenEvent).filter(OpenEvent.recipient_id == r.id).count()
-        r.total_clicks = db.query(ClickEvent).filter(ClickEvent.recipient_id == r.id).count()
+        r.total_opens = db.query(SendLog).filter(SendLog.recipient_id == r.id, SendLog.open_count > 0).count()
+        r.total_clicks = db.query(SendLog).filter(SendLog.recipient_id == r.id, SendLog.click_count > 0).count()
     return recs
 
 @router.post("/")
