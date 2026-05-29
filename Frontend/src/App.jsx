@@ -420,13 +420,42 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
   );
 }
 
-
 function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) {
   const [reportData, setReportData] = useState(null);
   const [sendModal, setSendModal] = useState(null);
+  const [viewCampaign, setViewCampaign] = useState(null);
+  const [newCampModal, setNewCampModal] = useState(false);
+  
+  // New Campaign Form State
+  const [newCampName, setNewCampName] = useState("");
+  const [newCampSubject, setNewCampSubject] = useState("");
+  const [newCampBody, setNewCampBody] = useState("");
+  
+  // A/B Testing State
+  const [isABTest, setIsABTest] = useState(false);
+  const [subjectB, setSubjectB] = useState("");
+  const [bodyHtmlB, setBodyHtmlB] = useState("");
+
   const [selRecs, setSelRecs] = useState([]);
   const [selGroups, setSelGroups] = useState([]);
   const [sending, setSending] = useState(false);
+
+  // Sort campaigns by sent_at (or id if not sent), newest first
+  const sortedCampaigns = [...campaigns].sort((a, b) => {
+    const dateA = new Date(a.sent_at || a.created_at || 0);
+    const dateB = new Date(b.sent_at || b.created_at || 0);
+    return dateB - dateA;
+  });
+
+  const formatDate = (dateString) => {
+    if (!dateString) return "Not sent yet";
+    return new Date(dateString).toLocaleString('en-US', {
+      month: 'long', day: 'numeric', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+  };
+
+  const pct = (val) => (val ? `${val.toFixed(1)}%` : "0%");
 
   const viewReport = async (id) => {
     try {
@@ -447,7 +476,10 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const executeSend = async () => {
     setSending(true);
     try {
-      await api(`/campaigns/${sendModal}/send`, { method: "POST", body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: true }) });
+      await api(`/campaigns/${sendModal}/send`, { 
+        method: "POST", 
+        body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: true }) 
+      });
       showToast("Campaign queued for sending!");
       setSendModal(null);
       onRefresh();
@@ -455,10 +487,89 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     setSending(false);
   };
 
+  const createCampaign = async () => {
+    try {
+      const payload = { 
+        name: newCampName, 
+        subject: newCampSubject, 
+        body_html: newCampBody,
+        is_ab_test: isABTest,
+        subject_b: isABTest ? subjectB : null,
+        body_html_b: isABTest ? bodyHtmlB : null
+      };
+      await api("/campaigns", { method: "POST", body: JSON.stringify(payload) });
+      showToast("Campaign created successfully");
+      setNewCampModal(false);
+      
+      // Reset form
+      setNewCampName(""); setNewCampSubject(""); setNewCampBody("");
+      setIsABTest(false); setSubjectB(""); setBodyHtmlB("");
+      
+      onRefresh();
+    } catch (e) { showToast(e.message, "error"); }
+  };
+
   return (
     <div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb" }}>Campaigns</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb" }}>Campaigns</h1>
+        <button onClick={() => setNewCampModal(true)} style={{ background: "#3b82f6", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
+          + New Campaign
+        </button>
+      </div>
 
+      {/* CREATE CAMPAIGN MODAL */}
+      {newCampModal && (
+        <ModalOverlay title="Create New Campaign" onClose={() => setNewCampModal(false)}>
+          <input placeholder="Campaign Name (e.g. Q3 Newsletter)" value={newCampName} onChange={e => setNewCampName(e.target.value)} style={{ width: "100%", padding: 12, marginBottom: 15, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }} />
+          
+          <div style={{ background: "#1f2937", padding: 15, borderRadius: 8, marginBottom: 15 }}>
+            <h4 style={{ margin: "0 0 10px 0", color: "#9ca3af" }}>Variant A (Standard)</h4>
+            <input placeholder="Subject Line" value={newCampSubject} onChange={e => setNewCampSubject(e.target.value)} style={{ width: "100%", padding: 12, marginBottom: 10, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }} />
+            <textarea placeholder="HTML Body" value={newCampBody} onChange={e => setNewCampBody(e.target.value)} style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", minHeight: 120 }} />
+          </div>
+
+          <label style={{ display: "flex", alignItems: "center", gap: 10, color: "#d1d5db", marginBottom: 15, cursor: "pointer" }}>
+            <input type="checkbox" checked={isABTest} onChange={(e) => setIsABTest(e.target.checked)} style={{ accentColor: "#3b82f6", width: 18, height: 18 }} />
+            Enable A/B Testing (Test a different subject line or body)
+          </label>
+
+          {isABTest && (
+            <div style={{ background: "#1f2937", padding: 15, borderRadius: 8, marginBottom: 15, borderLeft: "4px solid #3b82f6" }}>
+              <h4 style={{ margin: "0 0 10px 0", color: "#60a5fa" }}>Variant B (Test Group)</h4>
+              <input placeholder="Variant B Subject Line" value={subjectB} onChange={e => setSubjectB(e.target.value)} style={{ width: "100%", padding: 12, marginBottom: 10, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }} />
+              <textarea placeholder="Variant B HTML Body" value={bodyHtmlB} onChange={e => setBodyHtmlB(e.target.value)} style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", minHeight: 120 }} />
+            </div>
+          )}
+
+          <button onClick={createCampaign} style={{ width: "100%", background: "#10b981", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>Save Campaign</button>
+        </ModalOverlay>
+      )}
+
+      {/* CAMPAIGN DETAILS MODAL */}
+      {viewCampaign && (
+        <ModalOverlay title="Campaign Details" onClose={() => setViewCampaign(null)}>
+          <div style={{ color: "#d1d5db", fontSize: 14 }}>
+            <div style={{ marginBottom: 12 }}>
+              <span style={{ color: "#9ca3af", fontWeight: "bold" }}>Campaign Name:</span> {viewCampaign.name}
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <span style={{ color: "#9ca3af", fontWeight: "bold" }}>Subject Line:</span> {viewCampaign.subject}
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <span style={{ color: "#9ca3af", fontWeight: "bold" }}>Sent On:</span> <span style={{ color: "#4ade80" }}>{formatDate(viewCampaign.sent_at)}</span>
+            </div>
+            
+            <div style={{ color: "#9ca3af", fontWeight: "bold", marginBottom: 8, borderTop: "1px solid #374151", paddingTop: 16 }}>Email Content:</div>
+            <div 
+              style={{ background: "#ffffff", color: "#000", padding: 20, borderRadius: 8, border: "1px solid #d1d5db", maxHeight: "40vh", overflowY: "auto" }}
+              dangerouslySetInnerHTML={{ __html: viewCampaign.body_html }} 
+            />
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* TRACKING REPORT MODAL */}
       {reportData && (
         <ModalOverlay title="Detailed Tracking Report" onClose={() => setReportData(null)}>
           <table style={{ width: "100%", textAlign: "left", color: "#d1d5db", fontSize: 13, borderCollapse: "collapse" }}>
@@ -474,7 +585,11 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
               {reportData.map((log, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid #1f2937" }}>
                   <td style={{ padding: "10px 0", color: "#f9fafb" }}>{log.email}</td>
-                  <td style={{ padding: "10px 0" }}>{log.variant}</td>
+                  <td style={{ padding: "10px 0" }}>
+                    <span style={{ background: log.variant === 'A' ? '#374151' : '#1e3a8a', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>
+                      {log.variant}
+                    </span>
+                  </td>
                   <td style={{ padding: "10px 0", color: log.opens > 0 ? "#4ade80" : "#9ca3af", fontWeight: log.opens > 0 ? "bold" : "normal" }}>{log.opens}</td>
                   <td style={{ padding: "10px 0", color: log.clicks > 0 ? "#a78bfa" : "#9ca3af", fontWeight: log.clicks > 0 ? "bold" : "normal" }}>{log.clicks}</td>
                 </tr>
@@ -484,6 +599,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
         </ModalOverlay>
       )}
 
+      {/* SEND AUDIENCE MODAL */}
       {sendModal && (
         <ModalOverlay title="Target Audience Selection" onClose={() => setSendModal(null)}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -514,14 +630,18 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
         </ModalOverlay>
       )}
 
+      {/* CAMPAIGN LIST */}
       <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
-        {campaigns.map(c => (
+        {sortedCampaigns.map(c => (
           <div key={c.id} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", gap: 20 }}>
             <div style={{ flex: 1 }}>
               <span style={{ fontWeight: 600, color: "#f9fafb", fontSize: 16 }}>{c.name}</span>
-              <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 4 }}>{c.subject}</div>
+              <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 4 }}>
+                {c.is_ab_test ? <span style={{ color: "#60a5fa", marginRight: 8, fontSize: 11, background: "#1e3a8a", padding: "2px 6px", borderRadius: 4 }}>A/B Test</span> : null}
+                {c.subject}
+              </div>
             </div>
-
+            
             <div style={{ textAlign: "right", marginRight: 20, minWidth: 120 }}>
               <div style={{ fontSize: 13, color: "#d1d5db", fontWeight: "bold" }}>Sent: {c.total_sent || 0}</div>
               <div style={{ fontSize: 12, color: "#4ade80" }}>Open Rate: {pct(c.open_rate)}</div>
@@ -529,6 +649,8 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
             </div>
 
             <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setViewCampaign(c)} style={{ background: "transparent", color: "#60a5fa", border: "1px solid #1e3a8a", borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontWeight: "bold" }}>🔍 Details</button>
+              
               {c.status === "sent" || c.status === "sending" ? (
                 <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>📊 Report</button>
               ) : (
@@ -542,6 +664,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     </div>
   );
 }
+
 
 function UnifiedAIFlowPage({ showToast, onRefresh }) {
   const [loading, setLoading] = useState(false);
