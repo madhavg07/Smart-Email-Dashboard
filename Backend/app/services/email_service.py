@@ -27,7 +27,7 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@mailpulse.dev")
 FROM_NAME = os.getenv("FROM_NAME", "MailPulse")
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+BASE_URL = "https://smart-email-dashboard.onrender.com"
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY", "")
@@ -76,9 +76,8 @@ def rewrite_links(html_body: str, send_log_id: str, recipient_id: str, campaign_
     html_body = re.sub(r'href="([^"]+)"', replace_link, html_body)
     return html_body
 
-
 def build_html_email(body_html: str, subject: str, recipient_name: str = "") -> str:
-    """Wrap the body in a clean, minimal email HTML template."""
+    """Wrap the body in a clean, professional, plain-text-like email HTML template."""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -86,30 +85,35 @@ def build_html_email(body_html: str, subject: str, recipient_name: str = "") -> 
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>{subject}</title>
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background:#f6f9fc; margin:0; padding:0; }}
-    .wrapper {{ max-width:600px; margin:40px auto; background:#fff;
-                border-radius:8px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.08); }}
-    .header {{ background:#0f172a; padding:24px 32px; }}
-    .header h1 {{ color:#fff; margin:0; font-size:20px; font-weight:600; }}
-    .body {{ padding:32px; color:#1e293b; line-height:1.7; font-size:15px; }}
-    .footer {{ background:#f1f5f9; padding:16px 32px; font-size:12px;
-               color:#94a3b8; border-top:1px solid #e2e8f0; }}
-    a {{ color:#6366f1; }}
+    body {{ 
+        font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif;
+        background-color: #ffffff; 
+        margin: 0; 
+        padding: 0; 
+        color: #333333;
+    }}
+    .container {{ 
+        max-width: 600px; 
+        margin: 0 auto; 
+        padding: 30px 20px; 
+        line-height: 1.6; 
+        font-size: 11pt; 
+    }}
+    a {{ 
+        color: #0056b3; 
+        text-decoration: none; 
+    }}
+    a:hover {{
+        text-decoration: underline;
+    }}
   </style>
 </head>
 <body>
-  <div class="wrapper">
-    <div class="header"><h1>MailPulse</h1></div>
-    <div class="body">{body_html}</div>
-    <div class="footer">
-      You received this email because you opted in. 
-      <a href="{{unsubscribe_link}}">Unsubscribe</a>
-    </div>
+  <div class="container">
+    {body_html}
   </div>
 </body>
 </html>"""
-
 
 async def send_email_smtp(
     to_email: str,
