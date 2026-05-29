@@ -84,6 +84,10 @@ class Campaign(Base):
     open_rate = Column(Float, default=0.0)
     click_rate = Column(Float, default=0.0)
 
+    is_ab_test = Column(Boolean, default=False)
+    subject_b = Column(String, nullable=True)
+    body_html_b = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     send_logs = relationship("SendLog", back_populates="campaign")
@@ -109,7 +113,7 @@ class SendLog(Base):
     recipient = relationship("Recipient", back_populates="send_logs")
     open_events = relationship("OpenEvent", back_populates="send_log")
     click_events = relationship("ClickEvent", back_populates="send_log")
-    
+
     is_ab_test = Column(Boolean, default=False)
     subject_b = Column(String, nullable=True)
     body_html_b = Column(Text, nullable=True)
