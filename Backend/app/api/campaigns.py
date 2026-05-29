@@ -3,15 +3,18 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent
-from typing import List
+from typing import List, Optional
 
 router = APIRouter()
 
+# 1. Updated Schema for A/B Testing
 class CampaignCreate(BaseModel):
     name: str
     subject: str
     body_html: str
-    ab_variants: List[dict] | None = []
+    is_ab_test: bool = False
+    subject_b: Optional[str] = None
+    body_html_b: Optional[str] = None
 
 @router.get("/")
 async def list_campaigns(db: Session = Depends(get_db)):
@@ -27,13 +30,16 @@ async def list_campaigns(db: Session = Depends(get_db)):
         c.click_rate = (unique_clicks / c.total_sent * 100) if c.total_sent > 0 else 0.0
     return campaigns
 
+# 2. Updated Route to save Variant B data
 @router.post("/")
 async def create_campaign(campaign: CampaignCreate, db: Session = Depends(get_db)):
     new_campaign = Campaign(
         name=campaign.name,
         subject=campaign.subject,
         body_html=campaign.body_html,
-        ab_variants=campaign.ab_variants,
+        is_ab_test=campaign.is_ab_test,
+        subject_b=campaign.subject_b,
+        body_html_b=campaign.body_html_b,
         status="draft",
     )
     db.add(new_campaign)
@@ -98,7 +104,7 @@ async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(g
         report.append({
             "email": recipient.email if recipient else "Unknown",
             "name": recipient.name if recipient else "Unknown",
-            "variant": log.variant,
+            "variant": getattr(log, 'variant', 'A'), # Safe fallback in case old logs lack the column
             "opens": log.open_count,
             "clicks": log.click_count,
             "first_opened": log.first_opened_at

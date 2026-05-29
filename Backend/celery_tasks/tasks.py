@@ -56,58 +56,58 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
         db.commit()
 
         sent_count = 0
-        for rid in recipient_ids:
+        for idx, rid in enumerate(recipient_ids):
             try:
                 recipient = db.query(Recipient).filter(Recipient.id == rid).first()
                 if not recipient or recipient.is_suppressed:
                     continue
 
-                subject = campaign.subject
-                body_html = campaign.body_html
+                active_variant = "A"
+                active_subject = campaign.subject
+                active_body = campaign.body_html
 
-                # AI Personalization
+                if campaign.is_ab_test and (idx % 2 != 0):
+                    active_variant = "B"
+                    active_subject = campaign.subject_b
+                    active_body = campaign.body_html_b
+
                 if personalize and (recipient.role or recipient.industry):
                     try:
                         result = asyncio.run(personalize_email(
-                            subject=subject, body=body_html,
+                            subject=active_subject, body=active_body,
                             recipient_name=recipient.name or recipient.email,
                             recipient_role=recipient.role, recipient_industry=recipient.industry,
                             recipient_company=recipient.company
                         ))
-                        subject = result.get("subject", subject)
-                        body_html = result.get("body", body_html)
+                        active_subject = result.get("subject", active_subject)
+                        active_body = result.get("body", active_body)
                     except Exception:
-                        pass # Fallback to default if AI fails
+                        pass 
 
-                # Tracking Pixel & Links
                 tracking_token = str(uuid.uuid4())
                 
-                # THREAD-BUSTER FIX: Add invisible zero-width spaces to trick Gmail
-                # This ensures every email is treated as a separate conversation!
                 invisible_spaces = '\u200B' * (sent_count + 1)
-                unique_subject = subject + invisible_spaces
+                unique_subject = active_subject + invisible_spaces
 
                 send_log = SendLog(
                     campaign_id=campaign_id, recipient_id=recipient.id,
                     tracking_token=tracking_token, 
-                    personalized_subject=unique_subject, # Using the unique subject!
-                    personalized_body=body_html, sent_at=datetime.utcnow()
+                    personalized_subject=unique_subject,
+                    personalized_body=active_body, sent_at=datetime.utcnow(),
+                    variant=active_variant 
                 )
                 db.add(send_log)
                 db.flush() 
 
-                # Ensure build_html_email and send_single_email also use unique_subject
-                full_html = build_html_email(body_html, unique_subject, recipient.name or "")
+                full_html = build_html_email(active_body, unique_subject, recipient.name or "")
                 full_html = rewrite_links(full_html, send_log.id, recipient.id, campaign_id, db)
                 full_html = inject_tracking_pixel(full_html, tracking_token)
                 db.commit()
 
-                # Send Email
                 success = asyncio.run(send_single_email(
                     to_email=recipient.email, to_name=recipient.name or recipient.email,
                     subject=unique_subject, html_body=full_html
                 ))
-                # ...
                 if success:
                     sent_count += 1
                     recipient.total_emails_received += 1
