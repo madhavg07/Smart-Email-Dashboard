@@ -114,9 +114,6 @@ class SendLog(Base):
     open_events = relationship("OpenEvent", back_populates="send_log")
     click_events = relationship("ClickEvent", back_populates="send_log")
 
-    is_ab_test = Column(Boolean, default=False)
-    subject_b = Column(String, nullable=True)
-    body_html_b = Column(Text, nullable=True)
 
 class OpenEvent(Base):
     __tablename__ = "open_events"
