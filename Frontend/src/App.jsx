@@ -846,7 +846,7 @@ function App() {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const res = await fetch(`http://localhost:8000/api${endpoint}`, { ...options, headers });
+    const res = await fetch(`https://smart-email-dashboard.onrender.com/api${endpoint}`, { ...options, headers });
     if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
     return res.json();
   };

@@ -11,7 +11,7 @@ function AuthPage({ onLogin }) {
   const [errorMsg, setErrorMsg] = useState(""); // The Inline Error State
   const [successMsg, setSuccessMsg] = useState(""); // For OTP sent messages
 
-  const API_BASE = "http://localhost:8000/api";
+  const API_BASE = "https://smart-email-dashboard.onrender.com/api";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
