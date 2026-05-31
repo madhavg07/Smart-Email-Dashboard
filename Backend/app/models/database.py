@@ -27,120 +27,109 @@ def get_db():
 
 def gen_uuid():
     return str(uuid.uuid4())
-
-class Group(Base):
-    __tablename__ = "groups"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    name = Column(String, unique=True, nullable=False)
-    description = Column(String)
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    campaigns = relationship("Campaign", back_populates="owner", cascade="all, delete-orphan")
+    recipients = relationship("Recipient", back_populates="owner", cascade="all, delete-orphan")
+    groups = relationship("Group", back_populates="owner", cascade="all, delete-orphan")
 
-class Recipient(Base):
-    __tablename__ = "recipients"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    email = Column(String, unique=True, nullable=False, index=True)
-    name = Column(String)
-    role = Column(String)           
-    industry = Column(String)
-    company = Column(String)
-    metadata_ = Column(JSON, default={})
-
-    seriousness_score = Column(Float, default=0.5)
-    total_opens = Column(Integer, default=0)
-    total_clicks = Column(Integer, default=0)
-    total_emails_received = Column(Integer, default=0)
-    avg_open_delay_minutes = Column(Float, default=None)  
-    is_suppressed = Column(Boolean, default=False)       
-
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    send_logs = relationship("SendLog", back_populates="recipient")
-    open_events = relationship("OpenEvent", back_populates="recipient")
-    click_events = relationship("ClickEvent", back_populates="recipient")
+# --- UPDATED EXISTING TABLES ---
 
 class Campaign(Base):
     __tablename__ = "campaigns"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False) # The Ownership Link
     name = Column(String, nullable=False)
     subject = Column(String, nullable=False)
     body_html = Column(Text, nullable=False)
-    body_text = Column(Text)
-    status = Column(String, default="draft")  
-
-    ab_variants = Column(JSON, default=[])    
-    winning_variant = Column(String, default=None)
-
-    scheduled_at = Column(DateTime, default=None)
-    sent_at = Column(DateTime, default=None)
-
-    total_recipients = Column(Integer, default=0)
+    status = Column(String, default="draft")
     total_sent = Column(Integer, default=0)
-    total_opens = Column(Integer, default=0)
-    total_clicks = Column(Integer, default=0)
-    open_rate = Column(Float, default=0.0)
-    click_rate = Column(Float, default=0.0)
-
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # A/B Testing Columns
     is_ab_test = Column(Boolean, default=False)
     subject_b = Column(String, nullable=True)
     body_html_b = Column(Text, nullable=True)
 
+    owner = relationship("User", back_populates="campaigns")
+
+
+class Recipient(Base):
+    __tablename__ = "recipients"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False) # The Ownership Link
+    email = Column(String, nullable=False) # Removed unique=True so different users can have the same email in their lists
+    name = Column(String, nullable=True)
+    company = Column(String, nullable=True)
+    role = Column(String, nullable=True)
+    industry = Column(String, nullable=True)
+    
+    is_suppressed = Column(Boolean, default=False)
+    total_emails_received = Column(Integer, default=0)
+    total_opens = Column(Integer, default=0)
+    total_clicks = Column(Integer, default=0)
+    seriousness_score = Column(Float, default=0.0)
+    metadata_ = Column("metadata", JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    send_logs = relationship("SendLog", back_populates="campaign")
+    owner = relationship("User", back_populates="recipients")
+
+
+class Group(Base):
+    __tablename__ = "groups"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False) # The Ownership Link
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    owner = relationship("User", back_populates="groups")
+
 
 class SendLog(Base):
     __tablename__ = "send_logs"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
-    campaign_id = Column(String, ForeignKey("campaigns.id"), nullable=False)
-    recipient_id = Column(String, ForeignKey("recipients.id"), nullable=False)
-
-    tracking_token = Column(String, unique=True, index=True)   
-    variant = Column(String, default="A")                       
-    personalized_subject = Column(String)
-    personalized_body = Column(Text)
-
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    campaign_id = Column(String, ForeignKey("campaigns.id"))
+    recipient_id = Column(String, ForeignKey("recipients.id"))
+    tracking_token = Column(String, unique=True, index=True)
+    
+    variant = Column(String, default="A")
+    personalized_subject = Column(String, nullable=True)
+    personalized_body = Column(Text, nullable=True)
+    
     sent_at = Column(DateTime, default=datetime.utcnow)
-    first_opened_at = Column(DateTime, default=None)
+    first_opened_at = Column(DateTime, nullable=True)
     open_count = Column(Integer, default=0)
     click_count = Column(Integer, default=0)
-
-    campaign = relationship("Campaign", back_populates="send_logs")
-    recipient = relationship("Recipient", back_populates="send_logs")
-    open_events = relationship("OpenEvent", back_populates="send_log")
-    click_events = relationship("ClickEvent", back_populates="send_log")
 
 
 class OpenEvent(Base):
     __tablename__ = "open_events"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     send_log_id = Column(String, ForeignKey("send_logs.id"))
+    campaign_id = Column(String, ForeignKey("campaigns.id"))
     recipient_id = Column(String, ForeignKey("recipients.id"))
-    campaign_id = Column(String)
-    ip_address = Column(String)
-    user_agent = Column(String)
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
     opened_at = Column(DateTime, default=datetime.utcnow)
 
-    send_log = relationship("SendLog", back_populates="open_events")
-    recipient = relationship("Recipient", back_populates="open_events")
 
 class ClickEvent(Base):
     __tablename__ = "click_events"
-
-    id = Column(String, primary_key=True, default=gen_uuid)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     send_log_id = Column(String, ForeignKey("send_logs.id"))
+    campaign_id = Column(String, ForeignKey("campaigns.id"))
     recipient_id = Column(String, ForeignKey("recipients.id"))
-    campaign_id = Column(String)
-    original_url = Column(String)
-    click_token = Column(String, index=True)
-    ip_address = Column(String)
-    user_agent = Column(String)
+    click_token = Column(String, unique=True, index=True)
+    original_url = Column(String, nullable=False)
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
     clicked_at = Column(DateTime, default=datetime.utcnow)
-
-    send_log = relationship("SendLog", back_populates="click_events")
-    recipient = relationship("Recipient", back_populates="click_events")
+    
