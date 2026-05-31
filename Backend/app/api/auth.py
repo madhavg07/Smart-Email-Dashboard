@@ -5,6 +5,10 @@ from pydantic import BaseModel
 from app.models.database import get_db, User
 from app.services.auth_services import verify_password, create_access_token, get_password_hash
 
+import random
+from datetime import datetime, timedelta
+from app.services.email_service import send_single_email 
+
 router = APIRouter()
 
 class UserRegister(BaseModel):
@@ -42,3 +46,61 @@ async def login_for_access_token(
     
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp: str
+    new_password: str
+
+@router.post("/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == request.email).first()
+    
+    # Even if user doesn't exist, return a generic success message to prevent "email fishing"
+    if not user:
+        return {"message": "If that email exists, an OTP has been sent."}
+
+    # 1. Generate a 6-digit OTP
+    otp = str(random.randint(100000, 999999))
+    
+    # 2. Save it to the database, valid for 15 minutes
+    user.reset_otp = otp
+    user.reset_otp_expires = datetime.utcnow() + timedelta(minutes=15)
+    db.commit()
+
+    # 3. Email the OTP using your existing MailPulse email service!
+    subject = "MailPulse Password Reset"
+    body_html = f"<h2>Password Reset</h2><p>Your One-Time Password (OTP) is: <strong>{otp}</strong></p><p>This code expires in 15 minutes.</p>"
+    
+    # Using your existing email function
+    await send_single_email(
+        to_email=user.email, 
+        to_name="User", 
+        subject=subject, 
+        html_body=body_html
+    )
+
+    return {"message": "If that email exists, an OTP has been sent."}
+
+
+@router.post("/reset-password")
+async def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == request.email).first()
+    
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid request")
+        
+    # Check if OTP matches and is not expired
+    if user.reset_otp != request.otp or user.reset_otp_expires < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+    # Hash the new password and clear the OTP
+    user.hashed_password = get_password_hash(request.new_password)
+    user.reset_otp = None
+    user.reset_otp_expires = None
+    db.commit()
+
+    return {"message": "Password successfully reset!"}

@@ -38,6 +38,8 @@ class User(Base):
     campaigns = relationship("Campaign", back_populates="owner", cascade="all, delete-orphan")
     recipients = relationship("Recipient", back_populates="owner", cascade="all, delete-orphan")
     groups = relationship("Group", back_populates="owner", cascade="all, delete-orphan")
+    reset_otp = Column(String, nullable=True)
+    reset_otp_expires = Column(DateTime, nullable=True)
 
 # --- UPDATED EXISTING TABLES ---
 
