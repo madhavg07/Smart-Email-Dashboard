@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import { api, getToken, clearToken } from './api';
 import Login from './pages/Login';
+import AuthPage from './pages/AuthPage';
 
 const fmt = (n, d = 1) => (n ?? 0).toFixed(d);
 const pct = (n) => `${fmt(n)}%`;
@@ -802,6 +803,59 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
         <input style={inputStyle} placeholder="Name this Campaign (e.g., Q3 Outreach)" value={campaignName} onChange={e => setCampaignName(e.target.value)} />
         <button onClick={saveToDrafts} disabled={loading} style={{ background: "#22c55e", color: "#fff", padding: "12px 24px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>💾 Save as Draft Campaign</button>
       </div>
+    </div>
+  );
+}
+
+function App() {
+  // 1. Add token state initialized from localStorage
+  const [token, setToken] = useState(localStorage.getItem("token") || null);
+  
+  // ... your existing state (campaigns, recipients, etc) ...
+
+  // 2. The Login Handler
+  const handleLogin = (newToken) => {
+    localStorage.setItem("token", newToken);
+    setToken(newToken);
+  };
+
+  // 3. The Logout Handler (Add this to your Sidebar UI somewhere!)
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    setToken(null);
+  };
+
+  // 4. Update your API wrapper to include the token!
+  // (Find your existing api() fetch wrapper and make sure it looks like this)
+  const api = async (endpoint, options = {}) => {
+    const headers = { 
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    };
+
+    // Attach the digital VIP pass to every request
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(`http://localhost:8000/api${endpoint}`, { ...options, headers });
+    if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
+    return res.json();
+  };
+
+  // 5. THE GATEKEEPER
+  // If there is no token, completely hide the dashboard and show the Auth page.
+  if (!token) {
+    return <AuthPage onLogin={handleLogin} showToast={showToast} />;
+  }
+
+  // ... if token exists, render your normal Dashboard layout below ...
+  return (
+    <div className="dashboard-container">
+      {/* Add a logout button to your sidebar or header */}
+      <button onClick={handleLogout}>Logout</button>
+      
+      {/* Your existing dashboard code */}
     </div>
   );
 }
