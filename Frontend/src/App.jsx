@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
 import { api, getToken, clearToken } from './api';
-import Login from './pages/Login';
+// import Login from './pages/Login';
 import AuthPage from './pages/AuthPage';
 
 const fmt = (n, d = 1) => (n ?? 0).toFixed(d);
@@ -72,7 +72,15 @@ export default function MailPulse() {
   ];
 
   if (!isAuthenticated) {
-    return <Login onLoginSuccess={() => setIsAuthenticated(true)} />;
+    return (
+      <AuthPage 
+        onLogin={(newToken) => {
+          localStorage.setItem("token", newToken);
+          setIsAuthenticated(true);
+        }} 
+        showToast={showToast} 
+      />
+    );
   }
 
   return (
