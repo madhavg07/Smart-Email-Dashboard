@@ -7,17 +7,29 @@ import uuid
 from dotenv import load_dotenv
 
 load_dotenv()
-
 _raw_db = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mailpulse")
 DATABASE_URL = _raw_db.strip().strip('"').strip("'")
 
 if "sqlite" in DATABASE_URL.lower():
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
-    engine = create_engine(DATABASE_URL, connect_args={"connect_timeout": 30})
+    # 1. Start with your existing timeout
+    connect_args = {"connect_timeout": 30}
+    
+    # 2. Only enforce strict SSL if we are NOT running locally
+    if "localhost" not in DATABASE_URL:
+        connect_args["sslmode"] = "require"
+        
+    # 3. Add the anti-crash pooling settings here
+    engine = create_engine(
+        DATABASE_URL, 
+        pool_pre_ping=True,  # The magic fix: Tests connection before querying
+        pool_recycle=300,    # Refreshes connections every 5 minutes before Neon kills them
+        connect_args=connect_args
+    )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
 def get_db():
     db = SessionLocal()
     try:
