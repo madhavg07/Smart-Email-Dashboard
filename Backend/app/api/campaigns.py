@@ -2,12 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent
+from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent, User
 from typing import List, Optional
+from app.services.auth_services import get_current_user # THE BOUNCER
 
 router = APIRouter()
 
-# 1. Updated Schema for A/B Testing
 class CampaignCreate(BaseModel):
     name: str
     subject: str
@@ -17,8 +17,10 @@ class CampaignCreate(BaseModel):
     body_html_b: Optional[str] = None
 
 @router.get("/")
-async def list_campaigns(db: Session = Depends(get_db)):
-    campaigns = db.query(Campaign).all()
+async def list_campaigns(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # SECURITY: Only get campaigns belonging to the logged-in user!
+    campaigns = db.query(Campaign).filter(Campaign.user_id == current_user.id).all()
+    
     for c in campaigns:
         c.total_opens = db.query(func.sum(SendLog.open_count)).filter(SendLog.campaign_id == c.id).scalar() or 0
         c.total_clicks = db.query(func.sum(SendLog.click_count)).filter(SendLog.campaign_id == c.id).scalar() or 0
@@ -30,10 +32,10 @@ async def list_campaigns(db: Session = Depends(get_db)):
         c.click_rate = (unique_clicks / c.total_sent * 100) if c.total_sent > 0 else 0.0
     return campaigns
 
-# 2. Updated Route to save Variant B data
 @router.post("/")
-async def create_campaign(campaign: CampaignCreate, db: Session = Depends(get_db)):
+async def create_campaign(campaign: CampaignCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     new_campaign = Campaign(
+        user_id=current_user.id, # SECURITY: Stamp this campaign with the owner's ID
         name=campaign.name,
         subject=campaign.subject,
         body_html=campaign.body_html,
@@ -53,8 +55,9 @@ class SendRequest(BaseModel):
     personalize: bool = True
 
 @router.post("/{campaign_id}/send")
-async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Session = Depends(get_db)):
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # SECURITY: Make sure they actually own this campaign before sending!
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
@@ -68,7 +71,8 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
                 final_recipient_ids.add(rid)
         
         if payload.group_ids:
-            all_recs = db.query(Recipient).filter(Recipient.is_suppressed == False).all()
+            # SECURITY: Only pull recipients they own
+            all_recs = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.is_suppressed == False).all()
             for r in all_recs:
                 meta = r.metadata_ or {}
                 r_groups = meta.get("group_ids", [])
@@ -76,11 +80,11 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
                     final_recipient_ids.add(r.id)
                     
         if not payload.recipient_ids and not payload.group_ids:
-            all_recs = db.query(Recipient).filter(Recipient.is_suppressed == False).all()
+            all_recs = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.is_suppressed == False).all()
             for r in all_recs:
                 final_recipient_ids.add(r.id)
     else:
-        all_recs = db.query(Recipient).filter(Recipient.is_suppressed == False).all()
+        all_recs = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.is_suppressed == False).all()
         for r in all_recs:
             final_recipient_ids.add(r.id)
 
@@ -95,7 +99,12 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
     return {"status": "queued", "campaign_id": campaign_id, "queued": len(target_ids)}
 
 @router.get("/{campaign_id}/report")
-async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(get_db)):
+async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # SECURITY: Check ownership
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
     logs = db.query(SendLog).filter(SendLog.campaign_id == campaign_id).all()
     
     report = []
@@ -104,7 +113,7 @@ async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(g
         report.append({
             "email": recipient.email if recipient else "Unknown",
             "name": recipient.name if recipient else "Unknown",
-            "variant": getattr(log, 'variant', 'A'), # Safe fallback in case old logs lack the column
+            "variant": getattr(log, 'variant', 'A'),
             "opens": log.open_count,
             "clicks": log.click_count,
             "first_opened": log.first_opened_at
@@ -113,12 +122,12 @@ async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(g
     return {"logs": report}
 
 @router.delete("/{campaign_id}")
-async def delete_campaign(campaign_id: str, db: Session = Depends(get_db)):
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+async def delete_campaign(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # SECURITY: Check ownership
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     
-    # Safely remove all associated tracking logs first to avoid database constraint errors
     db.query(OpenEvent).filter(OpenEvent.campaign_id == campaign_id).delete()
     db.query(ClickEvent).filter(ClickEvent.campaign_id == campaign_id).delete()
     db.query(SendLog).filter(SendLog.campaign_id == campaign_id).delete()

@@ -2,25 +2,35 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
-from app.models.database import get_db, Campaign, Recipient, SendLog, OpenEvent, ClickEvent
+from app.models.database import get_db, Campaign, Recipient, SendLog, OpenEvent, ClickEvent, User
+from app.services.auth_services import get_current_user
 
 router = APIRouter()
 
 @router.get("/overview")
-def analytics_overview(db: Session = Depends(get_db)):
-    # Safely handle empty databases to prevent NoneType crashes
-    total_campaigns = db.query(Campaign).count() or 0
-    total_recipients = db.query(Recipient).count() or 0
-    suppressed = db.query(Recipient).filter(Recipient.is_suppressed == True).count() or 0
+def analytics_overview(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    total_campaigns = db.query(Campaign).filter(Campaign.user_id == current_user.id).count() or 0
+    total_recipients = db.query(Recipient).filter(Recipient.user_id == current_user.id).count() or 0
+    suppressed = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.is_suppressed == True).count() or 0
     
-    total_sent = db.query(func.sum(Campaign.total_sent)).scalar() or 0
-    unique_opens = db.query(SendLog).filter(SendLog.open_count > 0).count()
-    unique_clicks = db.query(SendLog).filter(SendLog.click_count > 0).count()
+    total_sent = db.query(func.sum(Campaign.total_sent)).filter(Campaign.user_id == current_user.id).scalar() or 0
     
-    hot = db.query(Recipient).filter(Recipient.seriousness_score >= 0.75).count() or 0
-    warm = db.query(Recipient).filter(Recipient.seriousness_score >= 0.50, Recipient.seriousness_score < 0.75).count() or 0
-    cold = db.query(Recipient).filter(Recipient.seriousness_score >= 0.25, Recipient.seriousness_score < 0.50).count() or 0
-    inactive = db.query(Recipient).filter(Recipient.seriousness_score < 0.25).count() or 0
+    # 2. Join the Campaign table to securely filter SendLogs
+    unique_opens = db.query(SendLog).join(Campaign).filter(
+        Campaign.user_id == current_user.id, 
+        SendLog.open_count > 0
+    ).count()
+    
+    unique_clicks = db.query(SendLog).join(Campaign).filter(
+        Campaign.user_id == current_user.id, 
+        SendLog.click_count > 0
+    ).count()
+    
+    # 3. Filter engagement scores
+    hot = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.seriousness_score >= 0.75).count() or 0
+    warm = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.seriousness_score >= 0.50, Recipient.seriousness_score < 0.75).count() or 0
+    cold = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.seriousness_score >= 0.25, Recipient.seriousness_score < 0.50).count() or 0
+    inactive = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.seriousness_score < 0.25).count() or 0
 
     return {
         "total_campaigns": total_campaigns,
@@ -33,6 +43,7 @@ def analytics_overview(db: Session = Depends(get_db)):
         "avg_click_rate": (unique_clicks / total_sent * 100) if total_sent > 0 else 0,
         "engagement_breakdown": {"hot": hot, "warm": warm, "cold": cold, "inactive": inactive}
     }
+
 @router.get("/opens-over-time")
 def opens_over_time(db: Session = Depends(get_db)):
     now = datetime.utcnow()

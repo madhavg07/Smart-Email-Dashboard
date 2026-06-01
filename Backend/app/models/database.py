@@ -52,6 +52,9 @@ class User(Base):
     groups = relationship("Group", back_populates="owner", cascade="all, delete-orphan")
     reset_otp = Column(String, nullable=True)
     reset_otp_expires = Column(DateTime, nullable=True)
+    is_verified = Column(Boolean, default=False)
+    verify_otp = Column(String, nullable=True)
+    verify_otp_expires = Column(DateTime, nullable=True)
 
 # --- UPDATED EXISTING TABLES ---
 
