@@ -834,23 +834,31 @@ function App() {
   };
 
   // 4. Update your API wrapper to include the token!
-  // (Find your existing api() fetch wrapper and make sure it looks like this)
   const api = async (endpoint, options = {}) => {
     const headers = { 
       "Content-Type": "application/json",
       ...(options.headers || {})
     };
 
-    // Attach the digital VIP pass to every request
+    // THIS IS THE MOST IMPORTANT PART:
+    // It attaches the VIP pass to every single request the dashboard makes
+    const token = localStorage.getItem("token");
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
     const res = await fetch(`https://smart-email-dashboard.onrender.com/api${endpoint}`, { ...options, headers });
-    if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
+    
+    if (!res.ok) {
+      // If the backend rejects the token, clear it to prevent a broken state
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        setToken(null);
+      }
+      throw new Error(`API Error: ${res.statusText}`);
+    }
     return res.json();
   };
-
   // 5. THE GATEKEEPER
   // If there is no token, completely hide the dashboard and show the Auth page.
   if (!token) {
