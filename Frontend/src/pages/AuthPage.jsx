@@ -1,15 +1,14 @@
 import React, { useState } from 'react';
 
 function AuthPage({ onLogin }) {
-  // Modes: 'login', 'register', 'forgot', 'reset'
   const [mode, setMode] = useState('login'); 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState(""); // The Inline Error State
-  const [successMsg, setSuccessMsg] = useState(""); // For OTP sent messages
+  const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState(""); 
 
   const API_BASE = "https://smart-email-dashboard.onrender.com/api";
 
@@ -31,7 +30,10 @@ function AuthPage({ onLogin }) {
           body: formData,
         });
 
-        if (!res.ok) throw new Error("Incorrect email or password.");
+        if (!res.ok) {
+           const errData = await res.json();
+           throw new Error(errData.detail || "Incorrect email or password.");
+        }
         const data = await res.json();
         onLogin(data.access_token);
       } 
@@ -47,6 +49,23 @@ function AuthPage({ onLogin }) {
           const errData = await res.json();
           throw new Error(errData.detail || "Failed to create account.");
         }
+        
+        setSuccessMsg("Account created! Please check your email for the verification code.");
+        setMode('verify-email');
+      }
+
+      else if (mode === 'verify-email') {
+        const res = await fetch(`${API_BASE}/auth/verify-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, otp }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.detail || "Invalid or expired verification code.");
+        }
+        
         const data = await res.json();
         onLogin(data.access_token);
       }
@@ -81,7 +100,7 @@ function AuthPage({ onLogin }) {
       }
 
     } catch (err) {
-      setErrorMsg(err.message); // Displays the error physically on screen!
+      setErrorMsg(err.message); 
     } finally {
       setLoading(false);
     }
@@ -94,18 +113,17 @@ function AuthPage({ onLogin }) {
         <h2 style={{ color: "#f9fafb", textAlign: "center", marginBottom: "30px", fontSize: "24px" }}>
           {mode === 'login' && "Welcome Back"}
           {mode === 'register' && "Create Account"}
+          {mode === 'verify-email' && "Verify Email"}
           {mode === 'forgot' && "Reset Password"}
           {mode === 'reset' && "Enter OTP"}
         </h2>
 
-        {/* INLINE ERROR DISPLAY */}
         {errorMsg && (
           <div style={{ background: "#7f1d1d", color: "#fca5a5", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "14px", border: "1px solid #ef4444" }}>
             ⚠️ {errorMsg}
           </div>
         )}
 
-        {/* INLINE SUCCESS DISPLAY */}
         {successMsg && (
           <div style={{ background: "#064e3b", color: "#6ee7b7", padding: "12px", borderRadius: "8px", marginBottom: "20px", fontSize: "14px", border: "1px solid #10b981", textAlign: "center" }}>
             ✅ {successMsg}
@@ -114,22 +132,19 @@ function AuthPage({ onLogin }) {
         
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           
-          {/* Email is used in every mode */}
           <div>
             <label style={{ display: "block", color: "#9ca3af", marginBottom: "8px", fontSize: "14px" }}>Email</label>
-            <input type="email" required value={email} onChange={e => setEmail(e.target.value)} disabled={mode === 'reset'} style={{ width: "100%", boxSizing: "border-box", padding: "12px", borderRadius: "8px", border: "1px solid #374151", background: "#1f2937", color: "#fff" }} />
+            <input type="email" required value={email} onChange={e => setEmail(e.target.value)} disabled={mode === 'reset' || mode === 'verify-email'} style={{ width: "100%", boxSizing: "border-box", padding: "12px", borderRadius: "8px", border: "1px solid #374151", background: "#1f2937", color: "#fff" }} />
           </div>
 
-          {/* OTP Input (Only shows during Reset phase) */}
-          {mode === 'reset' && (
+          {(mode === 'reset' || mode === 'verify-email') && (
             <div>
               <label style={{ display: "block", color: "#9ca3af", marginBottom: "8px", fontSize: "14px" }}>6-Digit OTP</label>
               <input type="text" required value={otp} onChange={e => setOtp(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "12px", borderRadius: "8px", border: "1px solid #374151", background: "#1f2937", color: "#fff", letterSpacing: "2px" }} />
             </div>
           )}
 
-          {/* Password (Hides during forgot password email request) */}
-          {mode !== 'forgot' && (
+          {(mode === 'login' || mode === 'register' || mode === 'reset') && (
             <div>
               <label style={{ display: "block", color: "#9ca3af", marginBottom: "8px", fontSize: "14px" }}>
                 {mode === 'reset' ? "New Password" : "Password"}
@@ -138,7 +153,6 @@ function AuthPage({ onLogin }) {
             </div>
           )}
           
-          {/* Forgot Password Link (Only on Login screen) */}
           {mode === 'login' && (
             <div style={{ textAlign: "right", marginTop: "-10px" }}>
               <span onClick={() => {setMode('forgot'); setErrorMsg(""); setSuccessMsg("");}} style={{ color: "#9ca3af", fontSize: "12px", cursor: "pointer" }}>Forgot Password?</span>
@@ -146,17 +160,17 @@ function AuthPage({ onLogin }) {
           )}
 
           <button type="submit" disabled={loading} style={{ background: "#3b82f6", color: "#fff", border: "none", padding: "12px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "16px", marginTop: "10px" }}>
-            {loading ? "Processing..." : mode === 'login' ? "Login" : mode === 'register' ? "Sign Up" : mode === 'forgot' ? "Send OTP" : "Reset Password"}
+            {loading ? "Processing..." : mode === 'login' ? "Login" : mode === 'register' ? "Sign Up" : mode === 'verify-email' ? "Verify" : mode === 'forgot' ? "Send OTP" : "Reset Password"}
           </button>
         </form>
 
         <div style={{ textAlign: "center", marginTop: "24px", color: "#9ca3af", fontSize: "14px" }}>
-          {(mode === 'login' || mode === 'forgot' || mode === 'reset') ? "Don't have an account? " : "Already have an account? "}
+          {(mode === 'login' || mode === 'forgot' || mode === 'reset' || mode === 'verify-email') ? "Don't have an account? " : "Already have an account? "}
           <span 
             onClick={() => { setMode(mode === 'register' ? 'login' : 'register'); setErrorMsg(""); setSuccessMsg(""); }} 
             style={{ color: "#60a5fa", cursor: "pointer", fontWeight: "bold" }}
           >
-            {(mode === 'login' || mode === 'forgot' || mode === 'reset') ? "Register here" : "Login here"}
+            {(mode === 'login' || mode === 'forgot' || mode === 'reset' || mode === 'verify-email') ? "Register here" : "Login here"}
           </span>
         </div>
       </div>
