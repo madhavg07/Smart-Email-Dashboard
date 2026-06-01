@@ -5,10 +5,11 @@ pydantic==2.13.4
 python-dotenv==1.2.2
 httpx==0.28.1
 PyJWT==2.12.1
-passlib==1.7.4
+passlib[bcrypt]
 bcrypt==3.2.2
 python-multipart==0.0.29
 email-validator==2.3.0
 psycopg2-binary==2.9.12
 celery==5.6.3
 redis==7.4.0
+python-jose[cryptography]
