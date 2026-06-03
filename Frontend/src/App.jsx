@@ -6,7 +6,7 @@ import {
 
 // Import from your exact api.js file
 import { api, getToken, setToken, clearToken } from './api';
-import AuthPage from './AuthPage'; // Make sure AuthPage.jsx is in the same folder!
+import AuthPage from './pages/AuthPage';
 
 const fmt = (n, d = 1) => (n ?? 0).toFixed(d);
 const pct = (n) => `${fmt(n)}%`;
