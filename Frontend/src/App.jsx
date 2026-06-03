@@ -3,9 +3,10 @@ import {
   LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
-import { api, getToken, clearToken } from './api';
-// import Login from './pages/Login';
-import AuthPage from './pages/AuthPage';
+
+// Import from your exact api.js file
+import { api, getToken, setToken, clearToken } from './api';
+import AuthPage from './AuthPage'; // Make sure AuthPage.jsx is in the same folder!
 
 const fmt = (n, d = 1) => (n ?? 0).toFixed(d);
 const pct = (n) => `${fmt(n)}%`;
@@ -14,114 +15,9 @@ const scoreColor = (s) =>
 const scoreLabel = (s) =>
   s >= 0.75 ? "Hot 🔥" : s >= 0.5 ? "Warm ☀️" : s >= 0.25 ? "Cold 🌧" : "Inactive 💤";
 
-export default function MailPulse() {
-  const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
-  const [page, setPage] = useState("dashboard");
-  const [overview, setOverview] = useState({});
-  const [campaigns, setCampaigns] = useState([]);
-  const [recipients, setRecipients] = useState([]);
-  const [groups, setGroups] = useState([]);
-  const [timeline, setTimeline] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState(null);
-
-  const handleLogout = () => {
-    clearToken();
-    setIsAuthenticated(false);
-  };
-
-  const showToast = (msg, type = "success") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3500);
-  };
-
-  const loadData = useCallback(async () => {
-    if (!isAuthenticated) return;
-    setLoading(true);
-    try {
-      const [ov, cmp, rcp, tl, grp] = await Promise.all([
-        api("/analytics/overview").catch(() => ({})),
-        api("/campaigns/").catch(() => []),
-        api("/recipients/").catch(() => []),
-        api("/analytics/opens-over-time").catch(() => []),
-        api("/groups/").catch(() => []),
-      ]);
-      setOverview(ov || {});
-      setCampaigns(Array.isArray(cmp) ? cmp : (cmp?.campaigns || []));
-      setRecipients(Array.isArray(rcp) ? rcp : (rcp?.recipients || []));
-      setTimeline(Array.isArray(tl) ? tl : (tl?.timeline || []));
-      setGroups(Array.isArray(grp) ? grp : []);
-    } catch (e) {
-      console.error("Data load issue:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [isAuthenticated]);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadData();
-    }
-  }, [isAuthenticated, loadData]);
-
-  const pieData = [
-    { name: "Hot", value: overview?.engagement_breakdown?.hot || 0, fill: "#22c55e" },
-    { name: "Warm", value: overview?.engagement_breakdown?.warm || 0, fill: "#f59e0b" },
-    { name: "Cold", value: overview?.engagement_breakdown?.cold || 0, fill: "#60a5fa" },
-    { name: "Inactive", value: overview?.engagement_breakdown?.inactive || 0, fill: "#f87171" },
-  ];
-
-  if (!isAuthenticated) {
-    return (
-      <AuthPage 
-        onLogin={(newToken) => {
-          localStorage.setItem("token", newToken);
-          setIsAuthenticated(true);
-        }} 
-        showToast={showToast} 
-      />
-    );
-  }
-
-  return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#0a0f1a", color: "#f9fafb", fontFamily: "'Inter', 'Segoe UI', sans-serif" }}>
-      <aside style={{ width: 220, flexShrink: 0, background: "#0d1117", borderRight: "1px solid #1f2937", padding: "24px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
-        <div style={{ marginBottom: 24, padding: "0 8px" }}>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#60a5fa", letterSpacing: "-0.5px" }}>✉️ MailPulse</div>
-          <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>AI Email Intelligence</div>
-        </div>
-        {[
-          { id: "dashboard", icon: "📊", label: "Dashboard" },
-          { id: "campaigns", icon: "📨", label: "Campaigns" },
-          { id: "recipients", icon: "👥", label: "Recipients" },
-          { id: "groups", icon: "📂", label: "Groups" },
-          { id: "compose", icon: "✍️", label: "Smart Compose" },
-        ].map((n) => (
-          <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 16px", borderRadius: 8, background: page === n.id ? "#1d4ed820" : "transparent", border: page === n.id ? "1px solid #1d4ed840" : "1px solid transparent", color: page === n.id ? "#60a5fa" : "#9ca3af", cursor: "pointer", textAlign: "left", fontSize: 14, fontWeight: page === n.id ? 600 : 400, transition: "all 0.15s" }}>
-            <span style={{ fontSize: 18 }}>{n.icon}</span> {n.label}
-          </button>
-        ))}
-        <div style={{ marginTop: "auto", padding: "12px 8px", borderTop: "1px solid #1f2937" }}>
-          <button onClick={handleLogout} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, width: "100%", textAlign: "left", padding: "8px 0" }}>🚪 Logout</button>
-        </div>
-      </aside>
-
-      <main style={{ flex: 1, overflow: "auto", padding: 28 }}>
-        {toast && (
-          <div style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, background: toast.type === "error" ? "#7f1d1d" : "#14532d", color: "#fff", padding: "12px 20px", borderRadius: 10, fontSize: 14, boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
-            {toast.msg}
-          </div>
-        )}
-        {page === "dashboard" && <DashboardPage overview={overview} timeline={timeline} pieData={pieData} campaigns={campaigns} />}
-        {page === "campaigns" && <CampaignsPage campaigns={campaigns} recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
-        {page === "recipients" && <RecipientsPage recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
-        {page === "groups" && <GroupsPage groups={groups} recipients={recipients} onRefresh={loadData} showToast={showToast} />}
-        {page === "compose" && <UnifiedAIFlowPage showToast={showToast} onRefresh={loadData} />}
-      </main>
-    </div>
-  );
-}
-
+// ------------------------------------------------------------------
+// SHARED UI COMPONENTS
+// ------------------------------------------------------------------
 function StatCard({ label, value, sub, accent }) {
   return (
     <div style={{ background: "#111827", border: `1px solid ${accent}33`, borderRadius: 12, padding: "20px 24px", position: "relative", overflow: "hidden" }}>
@@ -133,14 +29,24 @@ function StatCard({ label, value, sub, accent }) {
   );
 }
 
-function Badge({ status }) {
-  const map = { sent: { bg: "#14532d", color: "#86efac", label: "Sent" }, sending: { bg: "#1e3a5f", color: "#7dd3fc", label: "Sending…" }, draft: { bg: "#292524", color: "#a8a29e", label: "Draft" }, paused: { bg: "#451a03", color: "#fdba74", label: "Paused" } };
-  const s = map[status] || map.draft;
-  return <span style={{ background: s.bg, color: s.color, borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{s.label}</span>;
+function ModalOverlay({ title, onClose, children }) {
+  return (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
+      <div style={{ background: "#111827", padding: 24, borderRadius: 12, border: "1px solid #3b82f6", width: "100%", maxWidth: 650, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, borderBottom: "1px solid #1f2937", paddingBottom: 12 }}>
+          <h3 style={{ margin: 0, color: "#60a5fa", fontSize: 18 }}>{title}</h3>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#f87171", cursor: "pointer", fontSize: 20, fontWeight: "bold" }}>✕</button>
+        </div>
+        <div style={{ overflowY: "auto", flex: 1, paddingRight: 8 }}>{children}</div>
+      </div>
+    </div>
+  );
 }
 
+// ------------------------------------------------------------------
+// PAGE COMPONENTS
+// ------------------------------------------------------------------
 function DashboardPage({ overview, timeline, pieData, campaigns }) {
-  const safeCampaigns = campaigns || [];
   return (
     <div>
       <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 6, color: "#f9fafb" }}>Overview</h1>
@@ -180,24 +86,11 @@ function DashboardPage({ overview, timeline, pieData, campaigns }) {
   );
 }
 
-function ModalOverlay({ title, onClose, children }) {
-  return (
-    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
-      <div style={{ background: "#111827", padding: 24, borderRadius: 12, border: "1px solid #3b82f6", width: "100%", maxWidth: 650, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, borderBottom: "1px solid #1f2937", paddingBottom: 12 }}>
-          <h3 style={{ margin: 0, color: "#60a5fa", fontSize: 18 }}>{title}</h3>
-          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#f87171", cursor: "pointer", fontSize: 20, fontWeight: "bold" }}>✕</button>
-        </div>
-        <div style={{ overflowY: "auto", flex: 1, paddingRight: 8 }}>{children}</div>
-      </div>
-    </div>
-  );
-}
 function GroupsPage({ groups, recipients, onRefresh, showToast }) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [loading, setLoading] = useState(false);
-  const [viewGroup, setViewGroup] = useState(null); // Controls the Recipients Modal
+  const [viewGroup, setViewGroup] = useState(null);
 
   const safeRecipients = recipients || [];
 
@@ -230,7 +123,6 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  // Find recipients belonging to the currently viewed group
   const groupMembers = viewGroup ? safeRecipients.filter(r => (r.metadata_?.group_ids || []).includes(viewGroup.id)) : [];
 
   return (
@@ -296,14 +188,13 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
   );
 }
 
-
 function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [newRecipient, setNewRecipient] = useState({ email: "", name: "", role: "", industry: "", company: "", newGroupName: "" });
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [saving, setSaving] = useState(false);
-  const [showGroupModal, setShowGroupModal] = useState(false); // Controls the Group Selection Modal
+  const [showGroupModal, setShowGroupModal] = useState(false);
 
   const safeRecipients = recipients || [];
   const filtered = safeRecipients.filter(r => {
@@ -435,12 +326,10 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const [viewCampaign, setViewCampaign] = useState(null);
   const [newCampModal, setNewCampModal] = useState(false);
   
-  // New Campaign Form State
   const [newCampName, setNewCampName] = useState("");
   const [newCampSubject, setNewCampSubject] = useState("");
   const [newCampBody, setNewCampBody] = useState("");
   
-  // A/B Testing State
   const [isABTest, setIsABTest] = useState(false);
   const [subjectB, setSubjectB] = useState("");
   const [bodyHtmlB, setBodyHtmlB] = useState("");
@@ -449,7 +338,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const [selGroups, setSelGroups] = useState([]);
   const [sending, setSending] = useState(false);
 
-  // Sort campaigns by sent_at (or id if not sent), newest first
   const sortedCampaigns = [...campaigns].sort((a, b) => {
     const dateA = new Date(a.sent_at || a.created_at || 0);
     const dateB = new Date(b.sent_at || b.created_at || 0);
@@ -464,8 +352,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     });
   };
 
-  const pct = (val) => (val ? `${val.toFixed(1)}%` : "0%");
-
   const viewReport = async (id) => {
     try {
       const res = await api(`/campaigns/${id}/report`);
@@ -474,7 +360,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   };
 
   const deleteCampaign = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this campaign? This will also delete its tracking data.")) return;
+    if (!window.confirm("Are you sure you want to delete this campaign?")) return;
     try {
       await api(`/campaigns/${id}`, { method: "DELETE" });
       showToast("Campaign deleted successfully");
@@ -509,11 +395,8 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
       await api("/campaigns", { method: "POST", body: JSON.stringify(payload) });
       showToast("Campaign created successfully");
       setNewCampModal(false);
-      
-      // Reset form
       setNewCampName(""); setNewCampSubject(""); setNewCampBody("");
       setIsABTest(false); setSubjectB(""); setBodyHtmlB("");
-      
       onRefresh();
     } catch (e) { showToast(e.message, "error"); }
   };
@@ -527,22 +410,18 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
         </button>
       </div>
 
-      {/* CREATE CAMPAIGN MODAL */}
       {newCampModal && (
         <ModalOverlay title="Create New Campaign" onClose={() => setNewCampModal(false)}>
           <input placeholder="Campaign Name (e.g. Q3 Newsletter)" value={newCampName} onChange={e => setNewCampName(e.target.value)} style={{ width: "100%", padding: 12, marginBottom: 15, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }} />
-          
           <div style={{ background: "#1f2937", padding: 15, borderRadius: 8, marginBottom: 15 }}>
             <h4 style={{ margin: "0 0 10px 0", color: "#9ca3af" }}>Variant A (Standard)</h4>
             <input placeholder="Subject Line" value={newCampSubject} onChange={e => setNewCampSubject(e.target.value)} style={{ width: "100%", padding: 12, marginBottom: 10, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }} />
             <textarea placeholder="HTML Body" value={newCampBody} onChange={e => setNewCampBody(e.target.value)} style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", minHeight: 120 }} />
           </div>
-
           <label style={{ display: "flex", alignItems: "center", gap: 10, color: "#d1d5db", marginBottom: 15, cursor: "pointer" }}>
             <input type="checkbox" checked={isABTest} onChange={(e) => setIsABTest(e.target.checked)} style={{ accentColor: "#3b82f6", width: 18, height: 18 }} />
-            Enable A/B Testing (Test a different subject line or body)
+            Enable A/B Testing
           </label>
-
           {isABTest && (
             <div style={{ background: "#1f2937", padding: 15, borderRadius: 8, marginBottom: 15, borderLeft: "4px solid #3b82f6" }}>
               <h4 style={{ margin: "0 0 10px 0", color: "#60a5fa" }}>Variant B (Test Group)</h4>
@@ -550,35 +429,22 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
               <textarea placeholder="Variant B HTML Body" value={bodyHtmlB} onChange={e => setBodyHtmlB(e.target.value)} style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", minHeight: 120 }} />
             </div>
           )}
-
           <button onClick={createCampaign} style={{ width: "100%", background: "#10b981", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>Save Campaign</button>
         </ModalOverlay>
       )}
 
-      {/* CAMPAIGN DETAILS MODAL */}
       {viewCampaign && (
         <ModalOverlay title="Campaign Details" onClose={() => setViewCampaign(null)}>
           <div style={{ color: "#d1d5db", fontSize: 14 }}>
-            <div style={{ marginBottom: 12 }}>
-              <span style={{ color: "#9ca3af", fontWeight: "bold" }}>Campaign Name:</span> {viewCampaign.name}
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <span style={{ color: "#9ca3af", fontWeight: "bold" }}>Subject Line:</span> {viewCampaign.subject}
-            </div>
-            <div style={{ marginBottom: 20 }}>
-              <span style={{ color: "#9ca3af", fontWeight: "bold" }}>Sent On:</span> <span style={{ color: "#4ade80" }}>{formatDate(viewCampaign.sent_at)}</span>
-            </div>
-            
+            <div style={{ marginBottom: 12 }}><span style={{ color: "#9ca3af", fontWeight: "bold" }}>Campaign Name:</span> {viewCampaign.name}</div>
+            <div style={{ marginBottom: 12 }}><span style={{ color: "#9ca3af", fontWeight: "bold" }}>Subject Line:</span> {viewCampaign.subject}</div>
+            <div style={{ marginBottom: 20 }}><span style={{ color: "#9ca3af", fontWeight: "bold" }}>Sent On:</span> <span style={{ color: "#4ade80" }}>{formatDate(viewCampaign.sent_at)}</span></div>
             <div style={{ color: "#9ca3af", fontWeight: "bold", marginBottom: 8, borderTop: "1px solid #374151", paddingTop: 16 }}>Email Content:</div>
-            <div 
-              style={{ background: "#ffffff", color: "#000", padding: 20, borderRadius: 8, border: "1px solid #d1d5db", maxHeight: "40vh", overflowY: "auto" }}
-              dangerouslySetInnerHTML={{ __html: viewCampaign.body_html }} 
-            />
+            <div style={{ background: "#ffffff", color: "#000", padding: 20, borderRadius: 8, border: "1px solid #d1d5db", maxHeight: "40vh", overflowY: "auto" }} dangerouslySetInnerHTML={{ __html: viewCampaign.body_html }} />
           </div>
         </ModalOverlay>
       )}
 
-      {/* TRACKING REPORT MODAL */}
       {reportData && (
         <ModalOverlay title="Detailed Tracking Report" onClose={() => setReportData(null)}>
           <table style={{ width: "100%", textAlign: "left", color: "#d1d5db", fontSize: 13, borderCollapse: "collapse" }}>
@@ -594,11 +460,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
               {reportData.map((log, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid #1f2937" }}>
                   <td style={{ padding: "10px 0", color: "#f9fafb" }}>{log.email}</td>
-                  <td style={{ padding: "10px 0" }}>
-                    <span style={{ background: log.variant === 'A' ? '#374151' : '#1e3a8a', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>
-                      {log.variant}
-                    </span>
-                  </td>
+                  <td style={{ padding: "10px 0" }}><span style={{ background: log.variant === 'A' ? '#374151' : '#1e3a8a', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>{log.variant}</span></td>
                   <td style={{ padding: "10px 0", color: log.opens > 0 ? "#4ade80" : "#9ca3af", fontWeight: log.opens > 0 ? "bold" : "normal" }}>{log.opens}</td>
                   <td style={{ padding: "10px 0", color: log.clicks > 0 ? "#a78bfa" : "#9ca3af", fontWeight: log.clicks > 0 ? "bold" : "normal" }}>{log.clicks}</td>
                 </tr>
@@ -608,7 +470,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
         </ModalOverlay>
       )}
 
-      {/* SEND AUDIENCE MODAL */}
       {sendModal && (
         <ModalOverlay title="Target Audience Selection" onClose={() => setSendModal(null)}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -639,7 +500,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
         </ModalOverlay>
       )}
 
-      {/* CAMPAIGN LIST */}
       <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
         {sortedCampaigns.map(c => (
           <div key={c.id} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", gap: 20 }}>
@@ -650,16 +510,13 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
                 {c.subject}
               </div>
             </div>
-            
             <div style={{ textAlign: "right", marginRight: 20, minWidth: 120 }}>
               <div style={{ fontSize: 13, color: "#d1d5db", fontWeight: "bold" }}>Sent: {c.total_sent || 0}</div>
               <div style={{ fontSize: 12, color: "#4ade80" }}>Open Rate: {pct(c.open_rate)}</div>
               <div style={{ fontSize: 12, color: "#a78bfa" }}>Click Rate: {pct(c.click_rate)}</div>
             </div>
-
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setViewCampaign(c)} style={{ background: "transparent", color: "#60a5fa", border: "1px solid #1e3a8a", borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontWeight: "bold" }}>🔍 Details</button>
-              
               {c.status === "sent" || c.status === "sending" ? (
                 <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>📊 Report</button>
               ) : (
@@ -674,13 +531,10 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   );
 }
 
-
 function UnifiedAIFlowPage({ showToast, onRefresh }) {
   const [loading, setLoading] = useState(false);
   const [campaignName, setCampaignName] = useState("");
-
   const [baseForm, setBaseForm] = useState({ subject: "", body: "", name: "Alex", role: "Manager", company: "TechCorp", industry: "Software" });
-
   const [personalized, setPersonalized] = useState(null);
   const [variants, setVariants] = useState([]);
   const [selectedVariant, setSelectedVariant] = useState(null);
@@ -815,63 +669,115 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
   );
 }
 
-function App() {
-  // 1. Add token state initialized from localStorage
-  const [token, setToken] = useState(localStorage.getItem("token") || null);
-  
-  // ... your existing state (campaigns, recipients, etc) ...
+// ------------------------------------------------------------------
+// MAIN APP COMPONENT (The Gatekeeper)
+// ------------------------------------------------------------------
+export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
+  const [page, setPage] = useState("dashboard");
+  const [overview, setOverview] = useState({});
+  const [campaigns, setCampaigns] = useState([]);
+  const [recipients, setRecipients] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [timeline, setTimeline] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState(null);
 
-  // 2. The Login Handler
-  const handleLogin = (newToken) => {
-    localStorage.setItem("token", newToken);
-    setToken(newToken);
-  };
-
-  // 3. The Logout Handler (Add this to your Sidebar UI somewhere!)
+  // Uses your api.js function to properly clear the token
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    setToken(null);
+    clearToken();
+    setIsAuthenticated(false);
   };
 
-  // 4. Update your API wrapper to include the token!
-  const api = async (endpoint, options = {}) => {
-    const headers = { 
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    };
-
-    // THIS IS THE MOST IMPORTANT PART:
-    // It attaches the VIP pass to every single request the dashboard makes
-    const token = localStorage.getItem("token");
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const res = await fetch(`https://smart-email-dashboard.onrender.com/api${endpoint}`, { ...options, headers });
-    
-    if (!res.ok) {
-      // If the backend rejects the token, clear it to prevent a broken state
-      if (res.status === 401) {
-        localStorage.removeItem("token");
-        setToken(null);
-      }
-      throw new Error(`API Error: ${res.statusText}`);
-    }
-    return res.json();
+  const showToast = (msg, type = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
   };
-  // 5. THE GATEKEEPER
-  // If there is no token, completely hide the dashboard and show the Auth page.
-  if (!token) {
-    return <AuthPage onLogin={handleLogin} showToast={showToast} />;
+
+  const loadData = useCallback(async () => {
+    if (!isAuthenticated) return;
+    setLoading(true);
+    try {
+      // Because we import `api` from api.js, it automatically adds the token!
+      const [ov, cmp, rcp, tl, grp] = await Promise.all([
+        api("/analytics/overview").catch(() => ({})),
+        api("/campaigns/").catch(() => []),
+        api("/recipients/").catch(() => []),
+        api("/analytics/opens-over-time").catch(() => []),
+        api("/groups/").catch(() => []),
+      ]);
+      setOverview(ov || {});
+      setCampaigns(Array.isArray(cmp) ? cmp : (cmp?.campaigns || []));
+      setRecipients(Array.isArray(rcp) ? rcp : (rcp?.recipients || []));
+      setTimeline(Array.isArray(tl) ? tl : (tl?.timeline || []));
+      setGroups(Array.isArray(grp) ? grp : []);
+    } catch (e) {
+      console.error("Data load issue:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadData();
+    }
+  }, [isAuthenticated, loadData]);
+
+  const pieData = [
+    { name: "Hot", value: overview?.engagement_breakdown?.hot || 0, fill: "#22c55e" },
+    { name: "Warm", value: overview?.engagement_breakdown?.warm || 0, fill: "#f59e0b" },
+    { name: "Cold", value: overview?.engagement_breakdown?.cold || 0, fill: "#60a5fa" },
+    { name: "Inactive", value: overview?.engagement_breakdown?.inactive || 0, fill: "#f87171" },
+  ];
+
+  if (!isAuthenticated) {
+    return (
+      <AuthPage 
+        onLogin={(newToken) => {
+          setToken(newToken); // Uses your api.js secure token setter!
+          setIsAuthenticated(true);
+        }} 
+        showToast={showToast} 
+      />
+    );
   }
 
-  // ... if token exists, render your normal Dashboard layout below ...
   return (
-    <div className="dashboard-container">
-      {/* Add a logout button to your sidebar or header */}
-      <button onClick={handleLogout}>Logout</button>
-      
-      {/* Your existing dashboard code */}
+    <div style={{ display: "flex", minHeight: "100vh", background: "#0a0f1a", color: "#f9fafb", fontFamily: "'Inter', 'Segoe UI', sans-serif" }}>
+      <aside style={{ width: 220, flexShrink: 0, background: "#0d1117", borderRight: "1px solid #1f2937", padding: "24px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ marginBottom: 24, padding: "0 8px" }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#60a5fa", letterSpacing: "-0.5px" }}>✉️ MailPulse</div>
+          <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>AI Email Intelligence</div>
+        </div>
+        {[
+          { id: "dashboard", icon: "📊", label: "Dashboard" },
+          { id: "campaigns", icon: "📨", label: "Campaigns" },
+          { id: "recipients", icon: "👥", label: "Recipients" },
+          { id: "groups", icon: "📂", label: "Groups" },
+          { id: "compose", icon: "✍️", label: "Smart Compose" },
+        ].map((n) => (
+          <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 16px", borderRadius: 8, background: page === n.id ? "#1d4ed820" : "transparent", border: page === n.id ? "1px solid #1d4ed840" : "1px solid transparent", color: page === n.id ? "#60a5fa" : "#9ca3af", cursor: "pointer", textAlign: "left", fontSize: 14, fontWeight: page === n.id ? 600 : 400, transition: "all 0.15s" }}>
+            <span style={{ fontSize: 18 }}>{n.icon}</span> {n.label}
+          </button>
+        ))}
+        <div style={{ marginTop: "auto", padding: "12px 8px", borderTop: "1px solid #1f2937" }}>
+          <button onClick={handleLogout} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, width: "100%", textAlign: "left", padding: "8px 0" }}>🚪 Logout</button>
+        </div>
+      </aside>
+
+      <main style={{ flex: 1, overflow: "auto", padding: 28 }}>
+        {toast && (
+          <div style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, background: toast.type === "error" ? "#7f1d1d" : "#14532d", color: "#fff", padding: "12px 20px", borderRadius: 10, fontSize: 14, boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
+            {toast.msg}
+          </div>
+        )}
+        {page === "dashboard" && <DashboardPage overview={overview} timeline={timeline} pieData={pieData} campaigns={campaigns} />}
+        {page === "campaigns" && <CampaignsPage campaigns={campaigns} recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
+        {page === "recipients" && <RecipientsPage recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
+        {page === "groups" && <GroupsPage groups={groups} recipients={recipients} onRefresh={loadData} showToast={showToast} />}
+        {page === "compose" && <UnifiedAIFlowPage showToast={showToast} onRefresh={loadData} />}
+      </main>
     </div>
   );
 }
