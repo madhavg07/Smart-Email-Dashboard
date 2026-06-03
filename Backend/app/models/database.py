@@ -55,6 +55,10 @@ class User(Base):
     is_verified = Column(Boolean, default=False)
     verify_otp = Column(String, nullable=True)
     verify_otp_expires = Column(DateTime, nullable=True)
+    smtp_host = Column(String, nullable=True)
+    smtp_port = Column(Integer, nullable=True)
+    smtp_username = Column(String, nullable=True)
+    smtp_password = Column(String, nullable=True)
 
 # --- UPDATED EXISTING TABLES ---
 

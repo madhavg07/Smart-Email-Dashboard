@@ -7,6 +7,8 @@ import asyncio
 import uuid
 import logging
 import ssl
+import smtplib
+from email.message import EmailMessage
 from celery import Celery
 from datetime import datetime
 from dotenv import load_dotenv
@@ -42,18 +44,38 @@ celery_app.conf.update(
 
 @celery_app.task(bind=True, max_retries=3)
 def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize: bool = True):
-    from app.models.database import SessionLocal, Campaign, Recipient, SendLog
-    from app.services.email_service import inject_tracking_pixel, rewrite_links, build_html_email, send_single_email
+    from app.models.database import SessionLocal, Campaign, Recipient, SendLog, User
+    from app.services.email_service import inject_tracking_pixel, rewrite_links, build_html_email
     from app.services.ai_service import personalize_email
+    from app.services.encryption import decrypt_password
 
     db = SessionLocal()
     try:
+        # Look up the campaign
         campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
         if not campaign:
             return
 
+        # Look up the User who owns this campaign to get their SMTP credentials
+        user = db.query(User).filter(User.id == campaign.user_id).first()
+        if not user or not user.smtp_host or not user.smtp_password:
+            campaign.status = "failed: Missing SMTP Credentials in Settings"
+            db.commit()
+            return
+
         campaign.status = "sending"
         db.commit()
+
+        # Connect to the User's Personal SMTP Server
+        try:
+            decrypted_password = decrypt_password(user.smtp_password)
+            server = smtplib.SMTP(user.smtp_host, user.smtp_port)
+            server.starttls()
+            server.login(user.smtp_username, decrypted_password)
+        except Exception as e:
+            campaign.status = f"failed: SMTP Login Error - {str(e)}"
+            db.commit()
+            return
 
         sent_count = 0
         for idx, rid in enumerate(recipient_ids):
@@ -104,21 +126,33 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
                 full_html = inject_tracking_pixel(full_html, tracking_token)
                 db.commit()
 
-                success = asyncio.run(send_single_email(
-                    to_email=recipient.email, to_name=recipient.name or recipient.email,
-                    subject=unique_subject, html_body=full_html
-                ))
-                if success:
-                    sent_count += 1
-                    recipient.total_emails_received += 1
+                # Build the Email Message
+                msg = EmailMessage()
+                msg['Subject'] = unique_subject
+                msg['From'] = user.smtp_username  # Sends from the user's connected email!
+                msg['To'] = recipient.email
+                msg.add_alternative(full_html, subtype='html')
+
+                # Send via the user's authenticated server
+                server.send_message(msg)
+                
+                sent_count += 1
+                recipient.total_emails_received += 1
+            
             except Exception as e:
                 db.rollback()
+                logger.error(f"Failed to send to {recipient.email}: {str(e)}")
+                # Continues to the next recipient even if one fails
+
+        # Close the connection to the user's SMTP server
+        server.quit()
 
         campaign.status = "sent"
         campaign.total_sent = sent_count
         campaign.sent_at = datetime.utcnow()
         db.commit()
         return {"sent": sent_count}
+        
     except Exception as e:
         db.rollback()
         raise self.retry(exc=e, countdown=60)
