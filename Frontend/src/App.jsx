@@ -682,11 +682,24 @@ export default function App() {
   const [timeline, setTimeline] = useState([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [smtpForm, setSmtpForm] = useState({ smtp_host: "smtp.gmail.com", smtp_port: 587, smtp_username: "", smtp_password: "" });
 
   // Uses your api.js function to properly clear the token
   const handleLogout = () => {
     clearToken();
     setIsAuthenticated(false);
+  };
+
+  const saveSettings = async (e) => {
+    e.preventDefault();
+    try {
+      await api("/settings/smtp", { method: "POST", body: JSON.stringify(smtpForm) });
+      showToast("SMTP settings saved securely!");
+      setShowSettings(false);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
   };
 
   const showToast = (msg, type = "success") => {
@@ -761,6 +774,10 @@ export default function App() {
             <span style={{ fontSize: 18 }}>{n.icon}</span> {n.label}
           </button>
         ))}
+        <div style={{ marginTop: "auto", padding: "12px 8px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <button onClick={() => setShowSettings(true)} style={{ background: "transparent", color: "#60a5fa", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, width: "100%", textAlign: "left", padding: "8px 0" }}>⚙️ SMTP Settings</button>
+          <button onClick={handleLogout} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, width: "100%", textAlign: "left", padding: "8px 0" }}>🚪 Logout</button>
+        </div>
         <div style={{ marginTop: "auto", padding: "12px 8px", borderTop: "1px solid #1f2937" }}>
           <button onClick={handleLogout} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, width: "100%", textAlign: "left", padding: "8px 0" }}>🚪 Logout</button>
         </div>
@@ -777,6 +794,35 @@ export default function App() {
         {page === "recipients" && <RecipientsPage recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
         {page === "groups" && <GroupsPage groups={groups} recipients={recipients} onRefresh={loadData} showToast={showToast} />}
         {page === "compose" && <UnifiedAIFlowPage showToast={showToast} onRefresh={loadData} />}
+        {showSettings && (
+          <ModalOverlay title="Configure Your Outbound SMTP Server" onClose={() => setShowSettings(false)}>
+            <form onSubmit={saveSettings} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>Connect your custom sender email. If using Gmail, you must enter a 16-character <strong>App Password</strong>, not your regular login password.</p>
+              
+              <div>
+                <label style={{ display: "block", color: "#9ca3af", fontSize: 12, marginBottom: 4 }}>SMTP Host</label>
+                <input value={smtpForm.smtp_host} onChange={e => setSmtpForm({...smtpForm, smtp_host: e.target.value})} style={{ width: "100%", padding: 10, borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#fff" }} required />
+              </div>
+              
+              <div>
+                <label style={{ display: "block", color: "#9ca3af", fontSize: 12, marginBottom: 4 }}>SMTP Port</label>
+                <input type="number" value={smtpForm.smtp_port} onChange={e => setSmtpForm({...smtpForm, smtp_port: parseInt(e.target.value) || 587})} style={{ width: "100%", padding: 10, borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#fff" }} required />
+              </div>
+
+              <div>
+                <label style={{ display: "block", color: "#9ca3af", fontSize: 12, marginBottom: 4 }}>Sender Email Address (Username)</label>
+                <input type="email" placeholder="you@gmail.com" value={smtpForm.smtp_username} onChange={e => setSmtpForm({...smtpForm, smtp_username: e.target.value})} style={{ width: "100%", padding: 10, borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#fff" }} required />
+              </div>
+
+              <div>
+                <label style={{ display: "block", color: "#9ca3af", fontSize: 12, marginBottom: 4 }}>SMTP Password / App Password</label>
+                <input type="password" placeholder="xxxx xxxx xxxx xxxx" value={smtpForm.smtp_password} onChange={e => setSmtpForm({...smtpForm, smtp_password: e.target.value})} style={{ width: "100%", padding: 10, borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#fff" }} required />
+              </div>
+
+              <button type="submit" style={{ background: "#22c55e", color: "#fff", border: "none", padding: 12, borderRadius: 8, fontWeight: "bold", cursor: "pointer", marginTop: 10 }}>Save Server Settings</button>
+            </form>
+          </ModalOverlay>
+        )}
       </main>
     </div>
   );
