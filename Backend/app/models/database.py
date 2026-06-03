@@ -129,6 +129,7 @@ class SendLog(Base):
     first_opened_at = Column(DateTime, nullable=True)
     open_count = Column(Integer, default=0)
     click_count = Column(Integer, default=0)
+    recipient = relationship("Recipient")
 
 
 class OpenEvent(Base):
