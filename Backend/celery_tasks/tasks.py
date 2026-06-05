@@ -68,13 +68,28 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
 
         # Connect to the User's Personal SMTP Server
         try:
+            import socket
             decrypted_password = decrypt_password(user.smtp_password)
-            server = smtplib.SMTP(user.smtp_host, user.smtp_port)
-            server.starttls()
+            
+            # FIX: Manually force IPv4 resolution to stop Render from failing on IPv6 addresses
+            resolved_ip = socket.gethostbyname(user.smtp_host)
+            logger.info(f"Resolved {user.smtp_host} directly to IPv4 address: {resolved_ip}")
+            
+            # Handle SSL/TLS dynamically based on the port provided
+            if int(user.smtp_port) == 465:
+                context = ssl.create_default_context()
+                server = smtplib.SMTP_SSL(resolved_ip, int(user.smtp_port), context=context, timeout=15)
+            else:
+                server = smtplib.SMTP(resolved_ip, int(user.smtp_port), timeout=15)
+                # Pass the original host string so SSL certificate validation doesn't throw a mismatch error
+                server.starttls(server_hostname=user.smtp_host)
+                
             server.login(user.smtp_username, decrypted_password)
+            
         except Exception as e:
             campaign.status = f"failed: SMTP Login Error - {str(e)}"
             db.commit()
+            logger.error(f"SMTP Connection failure: {str(e)}")
             return
 
         sent_count = 0
