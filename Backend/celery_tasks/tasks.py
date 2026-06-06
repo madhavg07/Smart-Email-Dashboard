@@ -67,19 +67,14 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
         db.commit()
 
         # Connect to the User's Personal SMTP Server
-        # Connect to the User's Personal SMTP Server
         try:
             decrypted_password = decrypt_password(user.smtp_password)
             
-            # If using Port 465 (Direct SSL)
             if int(user.smtp_port) == 465:
-                server = smtplib.SMTP_SSL(user.smtp_host, int(user.smtp_port), timeout=10)
-            
-            # If using Port 587 (Standard TLS)
+                server = smtplib.SMTP_SSL(user.smtp_host, int(user.smtp_port), timeout=15)
             else:
-                server = smtplib.SMTP(user.smtp_host, int(user.smtp_port), timeout=10)
+                server = smtplib.SMTP(user.smtp_host, int(user.smtp_port), timeout=15)
                 server.starttls()
-                
             server.login(user.smtp_username, decrypted_password)
             
         except Exception as e:
