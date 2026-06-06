@@ -1,6 +1,6 @@
 import sys
 import os
-# Force Celery to recognize the 'Backend' folder as the root directory
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import asyncio
@@ -16,14 +16,12 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# 1. Force SSL for Upstash Redis
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 if REDIS_URL.startswith("redis://") and "upstash" in REDIS_URL:
     REDIS_URL = REDIS_URL.replace("redis://", "rediss://")
 
 celery_app = Celery("mailpulse", broker=REDIS_URL, backend=REDIS_URL)
 
-# 2. Upstash-Proof Configuration
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
@@ -34,11 +32,11 @@ celery_app.conf.update(
     redis_backend_use_ssl={'ssl_cert_reqs': ssl.CERT_NONE},
     broker_connection_retry_on_startup=True,
     redis_socket_keepalive=True,
-    broker_pool_limit=None, # Prevents Upstash connection limit errors
+    broker_pool_limit=None,
     worker_prefetch_multiplier=1,
     broker_transport_options={
         'visibility_timeout': 3600,
-        'health_check_interval': 15, # Pings Upstash every 15s to keep it alive!
+        'health_check_interval': 15,
     }
 )
 
@@ -51,12 +49,10 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
 
     db = SessionLocal()
     try:
-        # Look up the campaign
         campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
         if not campaign:
             return
 
-        # Look up the User who owns this campaign to get their SMTP credentials
         user = db.query(User).filter(User.id == campaign.user_id).first()
         if not user or not user.smtp_host or not user.smtp_password:
             campaign.status = "failed: Missing SMTP Credentials in Settings"
@@ -66,15 +62,16 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
         campaign.status = "sending"
         db.commit()
 
-        # Connect to the User's Personal SMTP Server
         try:
             decrypted_password = decrypt_password(user.smtp_password)
+            context = ssl.create_default_context()
             
             if int(user.smtp_port) == 465:
-                server = smtplib.SMTP_SSL(user.smtp_host, int(user.smtp_port), timeout=15)
+                server = smtplib.SMTP_SSL(user.smtp_host, int(user.smtp_port), context=context, timeout=15)
             else:
                 server = smtplib.SMTP(user.smtp_host, int(user.smtp_port), timeout=15)
-                server.starttls()
+                server.starttls(context=context)
+                
             server.login(user.smtp_username, decrypted_password)
             
         except Exception as e:
@@ -132,14 +129,12 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
                 full_html = inject_tracking_pixel(full_html, tracking_token)
                 db.commit()
 
-                # Build the Email Message
                 msg = EmailMessage()
                 msg['Subject'] = unique_subject
-                msg['From'] = user.smtp_username  # Sends from the user's connected email!
+                msg['From'] = user.smtp_username 
                 msg['To'] = recipient.email
                 msg.add_alternative(full_html, subtype='html')
 
-                # Send via the user's authenticated server
                 server.send_message(msg)
                 
                 sent_count += 1
@@ -148,9 +143,7 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
             except Exception as e:
                 db.rollback()
                 logger.error(f"Failed to send to {recipient.email}: {str(e)}")
-                # Continues to the next recipient even if one fails
 
-        # Close the connection to the user's SMTP server
         server.quit()
 
         campaign.status = "sent"
