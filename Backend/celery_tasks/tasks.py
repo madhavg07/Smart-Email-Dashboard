@@ -67,22 +67,18 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
         db.commit()
 
         # Connect to the User's Personal SMTP Server
+        # Connect to the User's Personal SMTP Server
         try:
-            import socket
             decrypted_password = decrypt_password(user.smtp_password)
             
-            # FIX: Manually force IPv4 resolution to stop Render from failing on IPv6 addresses
-            resolved_ip = socket.gethostbyname(user.smtp_host)
-            logger.info(f"Resolved {user.smtp_host} directly to IPv4 address: {resolved_ip}")
-            
-            # Handle SSL/TLS dynamically based on the port provided
+            # If using Port 465 (Direct SSL)
             if int(user.smtp_port) == 465:
-                context = ssl.create_default_context()
-                server = smtplib.SMTP_SSL(resolved_ip, int(user.smtp_port), context=context, timeout=15)
+                server = smtplib.SMTP_SSL(user.smtp_host, int(user.smtp_port), timeout=10)
+            
+            # If using Port 587 (Standard TLS)
             else:
-                server = smtplib.SMTP(resolved_ip, int(user.smtp_port), timeout=15)
-                # Pass the original host string so SSL certificate validation doesn't throw a mismatch error
-                server.starttls(server_hostname=user.smtp_host)
+                server = smtplib.SMTP(user.smtp_host, int(user.smtp_port), timeout=10)
+                server.starttls()
                 
             server.login(user.smtp_username, decrypted_password)
             
