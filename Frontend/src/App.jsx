@@ -4,7 +4,6 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
 
-// Import from your exact api.js file
 import { api, getToken, setToken, clearToken } from './api';
 import AuthPage from './pages/AuthPage';
 
@@ -15,9 +14,6 @@ const scoreColor = (s) =>
 const scoreLabel = (s) =>
   s >= 0.75 ? "Hot 🔥" : s >= 0.5 ? "Warm ☀️" : s >= 0.25 ? "Cold 🌧" : "Inactive 💤";
 
-// ------------------------------------------------------------------
-// SHARED UI COMPONENTS
-// ------------------------------------------------------------------
 function StatCard({ label, value, sub, accent }) {
   return (
     <div style={{ background: "#111827", border: `1px solid ${accent}33`, borderRadius: 12, padding: "20px 24px", position: "relative", overflow: "hidden" }}>
@@ -43,9 +39,6 @@ function ModalOverlay({ title, onClose, children }) {
   );
 }
 
-// ------------------------------------------------------------------
-// PAGE COMPONENTS
-// ------------------------------------------------------------------
 function DashboardPage({ overview, timeline, pieData, campaigns }) {
   return (
     <div>
@@ -338,6 +331,9 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const [selGroups, setSelGroups] = useState([]);
   const [sending, setSending] = useState(false);
 
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedContent, setEditedContent] = useState("");
+
   const sortedCampaigns = [...campaigns].sort((a, b) => {
     const dateA = new Date(a.sent_at || a.created_at || 0);
     const dateB = new Date(b.sent_at || b.created_at || 0);
@@ -401,6 +397,21 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     } catch (e) { showToast(e.message, "error"); }
   };
 
+  const saveEditedCampaign = async () => {
+    try {
+      await api(`/campaigns/${viewCampaign.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ body_html: editedContent })
+      });
+      showToast("Content updated successfully");
+      setIsEditing(false);
+      setViewCampaign({ ...viewCampaign, body_html: editedContent });
+      onRefresh();
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -439,8 +450,31 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
             <div style={{ marginBottom: 12 }}><span style={{ color: "#9ca3af", fontWeight: "bold" }}>Campaign Name:</span> {viewCampaign.name}</div>
             <div style={{ marginBottom: 12 }}><span style={{ color: "#9ca3af", fontWeight: "bold" }}>Subject Line:</span> {viewCampaign.subject}</div>
             <div style={{ marginBottom: 20 }}><span style={{ color: "#9ca3af", fontWeight: "bold" }}>Sent On:</span> <span style={{ color: "#4ade80" }}>{formatDate(viewCampaign.sent_at)}</span></div>
-            <div style={{ color: "#9ca3af", fontWeight: "bold", marginBottom: 8, borderTop: "1px solid #374151", paddingTop: 16 }}>Email Content:</div>
-            <div style={{ background: "#ffffff", color: "#000", padding: 20, borderRadius: 8, border: "1px solid #d1d5db", maxHeight: "40vh", overflowY: "auto" }} dangerouslySetInnerHTML={{ __html: viewCampaign.body_html }} />
+            
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #374151", paddingTop: 16, marginBottom: 8 }}>
+              <div style={{ color: "#9ca3af", fontWeight: "bold" }}>Email Content:</div>
+              {viewCampaign.status !== "sent" && viewCampaign.status !== "sending" && (
+                !isEditing ? (
+                  <button onClick={() => setIsEditing(true)} style={{ background: "#3b82f6", color: "#fff", border: "none", padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: "bold" }}>✏️ Edit Content</button>
+                ) : (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { setIsEditing(false); setEditedContent(viewCampaign.body_html); }} style={{ background: "transparent", color: "#f87171", border: "1px solid #f87171", padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>Cancel</button>
+                    <button onClick={saveEditedCampaign} style={{ background: "#10b981", color: "#fff", border: "none", padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: "bold" }}>💾 Save</button>
+                  </div>
+                )
+              )}
+            </div>
+
+            {isEditing ? (
+              <textarea 
+                value={editedContent} 
+                onChange={(e) => setEditedContent(e.target.value)} 
+                style={{ width: "100%", padding: 12, borderRadius: 8, border: "2px solid #3b82f6", background: "#ffffff", color: "#000", minHeight: 200, fontFamily: "inherit" }} 
+              />
+            ) : (
+              <div style={{ background: "#ffffff", color: "#000", padding: 20, borderRadius: 8, border: "1px solid #d1d5db", maxHeight: "40vh", overflowY: "auto" }} dangerouslySetInnerHTML={{ __html: viewCampaign.body_html }} />
+            )}
+
           </div>
         </ModalOverlay>
       )}
@@ -516,7 +550,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
               <div style={{ fontSize: 12, color: "#a78bfa" }}>Click Rate: {pct(c.click_rate)}</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setViewCampaign(c)} style={{ background: "transparent", color: "#60a5fa", border: "1px solid #1e3a8a", borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontWeight: "bold" }}>🔍 Details</button>
+              <button onClick={() => { setViewCampaign(c); setIsEditing(false); setEditedContent(c.body_html); }} style={{ background: "transparent", color: "#60a5fa", border: "1px solid #1e3a8a", borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontWeight: "bold" }}>🔍 Details</button>
               {c.status === "sent" || c.status === "sending" ? (
                 <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>📊 Report</button>
               ) : (
@@ -534,7 +568,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
 function UnifiedAIFlowPage({ showToast, onRefresh }) {
   const [loading, setLoading] = useState(false);
   const [campaignName, setCampaignName] = useState("");
-  const [baseForm, setBaseForm] = useState({ subject: "", body: "", name: "Alex", role: "Manager", company: "TechCorp", industry: "Software" });
+  const [baseForm, setBaseForm] = useState({ subject: "", body: "", name: "", role: "", company: "", industry: "" });
   const [personalized, setPersonalized] = useState(null);
   const [variants, setVariants] = useState([]);
   const [selectedVariant, setSelectedVariant] = useState(null);
@@ -567,28 +601,34 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
     setSelectedVariant(variant);
     setLoading(true);
     try {
-      const targetBody = personalized ? personalized.body : baseForm.body;
+      const targetBody = variant.body; // Check spam on the specific variant's body!
       const res = await api("/ai/spam-check", { method: "POST", body: JSON.stringify({ subject: variant.subject, body: targetBody }) });
       setSpamScore(res);
     } catch (e) { showToast(e.message, "error"); }
     setLoading(false);
   };
 
-  const saveToDrafts = async () => {
-    if (!campaignName) return showToast("Provide a campaign name first", "error");
+  const saveToDrafts = async (includeABTest = false) => {
+    if (!campaignName) return showToast("Please provide a Campaign Name at the top first", "error");
     setLoading(true);
     try {
-      await api("/campaigns/", {
-        method: "POST", body: JSON.stringify({
-          name: campaignName,
-          subject: selectedVariant.subject,
-          body_html: personalized ? personalized.body : baseForm.body,
-          ab_variants: variants
-        })
-      });
-      showToast("Saved to Drafts!");
+      // Build the final payload to match your database structure
+      const payload = {
+        name: campaignName,
+        subject: personalized ? personalized.subject : baseForm.subject,
+        body_html: personalized ? personalized.body : baseForm.body,
+        is_ab_test: includeABTest && selectedVariant !== null,
+        subject_b: (includeABTest && selectedVariant) ? selectedVariant.subject : null,
+        body_html_b: (includeABTest && selectedVariant) ? selectedVariant.body : null
+      };
+
+      await api("/campaigns", { method: "POST", body: JSON.stringify(payload) });
+      
+      showToast("Saved to Drafts successfully!");
       onRefresh();
-      setBaseForm({ subject: "", body: "", name: "Alex", role: "Manager", company: "TechCorp", industry: "Software" });
+      
+      // Reset the form
+      setBaseForm({ subject: "", body: "", name: "", role: "", company: "", industry: "" });
       setPersonalized(null);
       setVariants([]);
       setSelectedVariant(null);
@@ -612,6 +652,14 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
   return (
     <div style={{ maxWidth: 800 }}>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", marginBottom: 6 }}>Unified AI Composer</h1>
+      
+      {/* Moved Campaign Name to the top so you don't forget it! */}
+      <input 
+        style={{ ...inputStyle, fontSize: 16, fontWeight: 'bold', borderColor: "#3b82f6", marginBottom: 20 }} 
+        placeholder="Name this Campaign (e.g., Q3 Outreach) - Required to Save" 
+        value={campaignName} 
+        onChange={e => setCampaignName(e.target.value)} 
+      />
 
       <div style={sectionStyle(true)}>
         <h3 style={{ marginTop: 0, color: "#60a5fa" }}>1. Base Context</h3>
@@ -620,22 +668,28 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
           <input style={inputStyle} placeholder="Role (e.g., CEO)" value={baseForm.role} onChange={e => setBaseForm({ ...baseForm, role: e.target.value })} />
         </div>
         <input style={inputStyle} placeholder="Base Subject" value={baseForm.subject} onChange={e => setBaseForm({ ...baseForm, subject: e.target.value })} />
-        <textarea style={{ ...inputStyle, minHeight: 100 }} placeholder="Base Body..." value={baseForm.body} onChange={e => setBaseForm({ ...baseForm, body: e.target.value })} />
+        <textarea style={{ ...inputStyle, minHeight: 100 }} placeholder="Paste raw text here..." value={baseForm.body} onChange={e => setBaseForm({ ...baseForm, body: e.target.value })} />
         <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
-          <button onClick={runPersonalization} disabled={loading || !baseForm.subject || !baseForm.body} style={{ background: "#1d4ed8", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer" }}>1a. Personalize Context</button>
-          <button onClick={runABVariants} disabled={loading || !baseForm.subject || !baseForm.body} style={{ background: "#374151", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer" }}>1b. Skip directly to A/B Variants</button>
+          <button onClick={runPersonalization} disabled={loading || !baseForm.subject || !baseForm.body} style={{ background: "#1d4ed8", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>Personalize Context</button>
         </div>
       </div>
 
       <div style={sectionStyle(personalized !== null)}>
         <h3 style={{ marginTop: 0, color: "#60a5fa" }}>2. AI Personalized Output</h3>
         <div style={{ color: "#d1d5db", fontSize: 14, marginBottom: 8 }}><strong>Subject:</strong> {personalized?.subject}</div>
-        <div style={{ color: "#9ca3af", fontSize: 13, whiteSpace: "pre-wrap", background: "#0d1117", padding: 12, borderRadius: 8 }}>{personalized?.body}</div>
-        <button onClick={runABVariants} disabled={loading} style={{ marginTop: 12, background: "#1d4ed8", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer" }}>Generate A/B Variants</button>
+        
+        {/* Render the preserved HTML beautifully */}
+        <div style={{ background: "#ffffff", color: "#000", padding: 15, borderRadius: 8, border: "1px solid #d1d5db" }} dangerouslySetInnerHTML={{ __html: personalized?.body }} />
+        
+        <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+          <button onClick={() => saveToDrafts(false)} disabled={loading} style={{ background: "#10b981", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>💾 Save to Drafts (Skip A/B)</button>
+          <button onClick={runABVariants} disabled={loading} style={{ background: "#374151", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>Generate A/B Test Variants ➔</button>
+        </div>
       </div>
 
       <div style={sectionStyle(variants.length > 0)}>
-        <h3 style={{ marginTop: 0, color: "#60a5fa" }}>3. Select a Variant to Analyze</h3>
+        <h3 style={{ marginTop: 0, color: "#60a5fa" }}>3. Select a Variant to Analyze & Review Formats</h3>
+        <p style={{ fontSize: 12, color: "#9ca3af" }}>Click a variant below to see the HTML formatted output and run a spam check.</p>
         <div style={{ display: "grid", gap: 12 }}>
           {variants.map((v, i) => (
             <div
@@ -653,7 +707,15 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
             >
               <div style={{ color: "#60a5fa", fontSize: 12, fontWeight: "bold" }}>{v.angle}</div>
               <div style={{ color: "#f9fafb", fontWeight: 600 }}>{v.subject}</div>
-              <div style={{ color: "#6b7280", fontSize: 12 }}>{v.rationale}</div>
+              <div style={{ color: "#6b7280", fontSize: 12, marginBottom: selectedVariant === v ? 12 : 0 }}>{v.rationale}</div>
+              
+              {/* Show the formatted body preview ONLY when selected */}
+              {selectedVariant === v && (
+                <div style={{ borderTop: "1px solid #3b82f6", paddingTop: 12, marginTop: 8 }}>
+                   <div style={{ color: "#9ca3af", fontSize: 11, marginBottom: 4, textTransform: "uppercase" }}>Formatting Preview:</div>
+                   <div style={{ background: "#ffffff", color: "#000", padding: 12, borderRadius: 6, fontSize: 13 }} dangerouslySetInnerHTML={{ __html: v.body }} />
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -662,16 +724,19 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
       <div style={sectionStyle(spamScore !== null)}>
         <h3 style={{ marginTop: 0, color: "#22c55e" }}>4. Final Review & Save</h3>
         <div style={{ fontSize: 18, color: spamScore?.score > 5 ? "#f87171" : "#4ade80", marginBottom: 12 }}>Spam Score: {spamScore?.score}/10</div>
-        <input style={inputStyle} placeholder="Name this Campaign (e.g., Q3 Outreach)" value={campaignName} onChange={e => setCampaignName(e.target.value)} />
-        <button onClick={saveToDrafts} disabled={loading} style={{ background: "#22c55e", color: "#fff", padding: "12px 24px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>💾 Save as Draft Campaign</button>
+        
+        {spamScore?.issues?.length > 0 && (
+          <ul style={{ color: "#fca5a5", fontSize: 13, marginBottom: 16 }}>
+             {spamScore.issues.map((issue, idx) => <li key={idx}>{issue}</li>)}
+          </ul>
+        )}
+
+        <button onClick={() => saveToDrafts(true)} disabled={loading} style={{ background: "#22c55e", color: "#fff", padding: "12px 24px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold", width: "100%" }}>💾 Save Complete A/B Test Campaign</button>
       </div>
     </div>
   );
 }
 
-// ------------------------------------------------------------------
-// MAIN APP COMPONENT (The Gatekeeper)
-// ------------------------------------------------------------------
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
   const [page, setPage] = useState("dashboard");
@@ -685,7 +750,6 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [smtpForm, setSmtpForm] = useState({ smtp_host: "smtp.gmail.com", smtp_port: 587, smtp_username: "", smtp_password: "" });
 
-  // Uses your api.js function to properly clear the token
   const handleLogout = () => {
     clearToken();
     setIsAuthenticated(false);
@@ -711,7 +775,6 @@ export default function App() {
     if (!isAuthenticated) return;
     setLoading(true);
     try {
-      // Because we import `api` from api.js, it automatically adds the token!
       const [ov, cmp, rcp, tl, grp] = await Promise.all([
         api("/analytics/overview").catch(() => ({})),
         api("/campaigns/").catch(() => []),
@@ -748,7 +811,7 @@ export default function App() {
     return (
       <AuthPage 
         onLogin={(newToken) => {
-          setToken(newToken); // Uses your api.js secure token setter!
+          setToken(newToken);
           setIsAuthenticated(true);
         }} 
         showToast={showToast} 
@@ -776,9 +839,6 @@ export default function App() {
         ))}
         <div style={{ marginTop: "auto", padding: "12px 8px", display: "flex", flexDirection: "column", gap: 8 }}>
           <button onClick={() => setShowSettings(true)} style={{ background: "transparent", color: "#60a5fa", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, width: "100%", textAlign: "left", padding: "8px 0" }}>⚙️ SMTP Settings</button>
-          <button onClick={handleLogout} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, width: "100%", textAlign: "left", padding: "8px 0" }}>🚪 Logout</button>
-        </div>
-        <div style={{ marginTop: "auto", padding: "12px 8px", borderTop: "1px solid #1f2937" }}>
           <button onClick={handleLogout} style={{ background: "transparent", color: "#f87171", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, width: "100%", textAlign: "left", padding: "8px 0" }}>🚪 Logout</button>
         </div>
       </aside>
