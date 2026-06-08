@@ -2,6 +2,7 @@ import os
 import json
 import httpx
 import logging
+import asyncio
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -51,18 +52,29 @@ async def _call_openai(prompt: str, system: str) -> str:
     messages.append({"role": "user", "content": prompt})
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            json={"model": "llama-3.1-8b-instant", "messages": messages, "max_tokens": 1500},
-        )
-        
-        if resp.status_code != 200:
-            raise ValueError(f"Groq API Error: {resp.text}")
+        # Loop to automatically retry up to 3 times if we hit a rate limit
+        for attempt in range(3):
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                json={"model": "llama-3.1-8b-instant", "messages": messages, "max_tokens": 1500},
+            )
             
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
+            # If Groq says "Slow down!" (HTTP 429), wait 2.5 seconds and try again
+            if resp.status_code == 429:
+                logger.warning(f"Groq Rate Limit Hit. Sleeping for 2.5s (Attempt {attempt+1}/3)...")
+                await asyncio.sleep(2.5)
+                continue
+                
+            if resp.status_code != 200:
+                raise ValueError(f"Groq API Error: {resp.text}")
+                
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+            
+        # If it fails 3 times in a row, throw the error
+        raise ValueError("Groq API rate limit exceeded after 3 retries. Please wait 1 minute.")
 
 async def personalize_email(subject: str, body: str, recipient_name: str, recipient_role: str = None, recipient_industry: str = None, recipient_company: str = None) -> dict:
     prompt = f"Rewrite this email to personalize it for {recipient_name}.\n"

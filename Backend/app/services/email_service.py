@@ -47,20 +47,20 @@ def inject_tracking_pixel(html_body: str, tracking_token: str) -> str:
 
     return html_body
 
-
 def rewrite_links(html_body: str, send_log_id: str, recipient_id: str, campaign_id: str, db) -> str:
     """Replace all href links with tracked redirect URLs."""
     from app.models.database import ClickEvent
+    
+    # NUCLEAR OPTION: Force the Live URL right here.
+    BASE_URL = os.getenv("BASE_URL", "https://smart-email-dashboard.onrender.com")
 
     def replace_link(match):
         original_url = match.group(1)
-        # Skip mailto, pixel urls, unsubscribe links
         if original_url.startswith("mailto:") or "/pixel/" in original_url or "/r/" in original_url:
             return match.group(0)
 
         click_token = str(uuid.uuid4())
 
-        # Store the click token mapping
         click_record = ClickEvent(
             send_log_id=send_log_id,
             recipient_id=recipient_id,
@@ -70,6 +70,7 @@ def rewrite_links(html_body: str, send_log_id: str, recipient_id: str, campaign_
         )
         db.add(click_record)
 
+        # Uses the forced BASE_URL
         tracked_url = f"{BASE_URL}/r/{click_token}"
         return f'href="{tracked_url}"'
 
