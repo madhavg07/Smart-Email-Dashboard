@@ -27,7 +27,7 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@mailpulse.dev")
 FROM_NAME = os.getenv("FROM_NAME", "MailPulse")
-BASE_URL = "https://smart-email-dashboard.onrender.com"
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY", "")

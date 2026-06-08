@@ -65,23 +65,24 @@ async def _call_openai(prompt: str, system: str) -> str:
         return data["choices"][0]["message"]["content"]
 
 async def personalize_email(subject: str, body: str, recipient_name: str, recipient_role: str = None, recipient_industry: str = None, recipient_company: str = None) -> dict:
-    prompt = f"""
-    Rewrite this email to personalize it for {recipient_name}.
-    Role: {recipient_role}
-    Industry: {recipient_industry}
-    Company: {recipient_company}
+    prompt = f"Rewrite this email to personalize it for {recipient_name}.\n"
     
-    Original Subject: {subject}
-    Original Body: {body}
+    # ONLY add these if they exist, preventing the AI from hallucinating!
+    if recipient_role:
+        prompt += f"Role: {recipient_role}\n"
+    if recipient_industry:
+        prompt += f"Industry: {recipient_industry}\n"
+    if recipient_company:
+        prompt += f"Company: {recipient_company}\n"
+        
+    prompt += f"\nOriginal Subject: {subject}\nOriginal Body: {body}\n\nRespond ONLY with a valid JSON object containing 'subject' and 'body' keys."
     
-    Respond ONLY with a valid JSON object containing "subject" and "body" keys.
-    """
     system = """
     You are an expert email marketer. Output strictly in JSON format.
     CRITICAL INSTRUCTIONS:
-    1. STRICT FACTUALITY: Do not invent company names, event names, or placeholders (like 'TechCorp'). If a detail is missing, omit it naturally.
-    2. BEAUTIFUL HTML FORMATTING: The input may be messy plain text. You MUST format the output "body" as highly readable HTML. Use <p>, <br>, <ul>, <li>, and <strong> to structure the text nicely.
-    3. LINK CONSERVATION: If the raw text contains a URL (e.g., https://...) or mentions a specific link, you MUST wrap it in a proper <a href="..."> HTML tag. Never delete a link.
+    1. STRICT FACTUALITY: Do not invent company names, event names, or placeholders. If a detail is missing, omit it naturally.
+    2. BEAUTIFUL HTML FORMATTING: The input may be messy plain text. Format the output "body" as highly readable HTML using <p>, <br>, <ul>, <li>, and <strong>.
+    3. LINK CONSERVATION: You MUST wrap any URLs in a proper <a href="..."> HTML tag. Never delete a link.
     """
     raw = await call_llm(prompt, system)
     raw = raw.strip().strip("```json").strip("```").strip()
