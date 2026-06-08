@@ -466,10 +466,12 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
             </div>
 
             {isEditing ? (
-              <textarea 
-                value={editedContent} 
-                onChange={(e) => setEditedContent(e.target.value)} 
-                style={{ width: "100%", padding: 12, borderRadius: 8, border: "2px solid #3b82f6", background: "#ffffff", color: "#000", minHeight: 200, fontFamily: "inherit" }} 
+              <div 
+                contentEditable 
+                suppressContentEditableWarning={true}
+                style={{ width: "100%", padding: 16, borderRadius: 8, border: "2px solid #3b82f6", background: "#ffffff", color: "#000", minHeight: 200, outline: "none", overflowY: "auto", fontFamily: "inherit" }} 
+                dangerouslySetInnerHTML={{ __html: editedContent }}
+                onBlur={(e) => setEditedContent(e.target.innerHTML)}
               />
             ) : (
               <div style={{ background: "#ffffff", color: "#000", padding: 20, borderRadius: 8, border: "1px solid #d1d5db", maxHeight: "40vh", overflowY: "auto" }} dangerouslySetInnerHTML={{ __html: viewCampaign.body_html }} />
