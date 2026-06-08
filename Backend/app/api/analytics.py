@@ -15,7 +15,6 @@ def analytics_overview(db: Session = Depends(get_db), current_user: User = Depen
     
     total_sent = db.query(func.sum(Campaign.total_sent)).filter(Campaign.user_id == current_user.id).scalar() or 0
     
-    # 2. Join the Campaign table to securely filter SendLogs
     unique_opens = db.query(SendLog).join(Campaign).filter(
         Campaign.user_id == current_user.id, 
         SendLog.open_count > 0
@@ -26,7 +25,6 @@ def analytics_overview(db: Session = Depends(get_db), current_user: User = Depen
         SendLog.click_count > 0
     ).count()
     
-    # 3. Filter engagement scores
     hot = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.seriousness_score >= 0.75).count() or 0
     warm = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.seriousness_score >= 0.50, Recipient.seriousness_score < 0.75).count() or 0
     cold = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.seriousness_score >= 0.25, Recipient.seriousness_score < 0.50).count() or 0
@@ -45,19 +43,19 @@ def analytics_overview(db: Session = Depends(get_db), current_user: User = Depen
     }
 
 @router.get("/opens-over-time")
-def opens_over_time(db: Session = Depends(get_db)):
+def opens_over_time(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     now = datetime.utcnow()
-    # Go exactly 30 days back from right now
     thirty_days_ago = now - timedelta(days=30)
     
-    # Pre-fill the dictionary with exactly 31 days (30 days ago + TODAY)
     data_map = {}
     for i in range(31):
         dt = (thirty_days_ago + timedelta(days=i)).strftime("%Y-%m-%d")
         data_map[dt] = 0
 
-    # 1. Try reading from the detailed OpenEvent table first
-    events = db.query(OpenEvent).filter(OpenEvent.opened_at >= thirty_days_ago).all()
+    events = db.query(OpenEvent).join(SendLog).join(Campaign).filter(
+        Campaign.user_id == current_user.id,
+        OpenEvent.opened_at >= thirty_days_ago
+    ).all()
     
     if events:
         for e in events:
@@ -66,16 +64,16 @@ def opens_over_time(db: Session = Depends(get_db)):
                 if dt in data_map:
                     data_map[dt] += 1
     else:
-        # 2. FALLBACK: If OpenEvents is empty, read directly from the SendLogs 
-        # (This guarantees the graph matches the individual campaign reports)
-        logs = db.query(SendLog).filter(SendLog.first_opened_at >= thirty_days_ago).all()
+        logs = db.query(SendLog).join(Campaign).filter(
+            Campaign.user_id == current_user.id,
+            SendLog.first_opened_at >= thirty_days_ago
+        ).all()
         for log in logs:
             if log.first_opened_at:
                 dt = log.first_opened_at.strftime("%Y-%m-%d")
                 if dt in data_map:
                     data_map[dt] += log.open_count
 
-    # Format perfectly for Recharts in the React frontend
     timeline = [{"date": k, "opens": v} for k, v in data_map.items()]
     
     return {"timeline": timeline}

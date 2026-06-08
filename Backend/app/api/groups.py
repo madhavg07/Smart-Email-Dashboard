@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from app.models.database import get_db, Group, Recipient
 
+from app.services.auth_services import get_current_user
+
 router = APIRouter()
 
 class GroupCreate(BaseModel):
@@ -14,20 +16,23 @@ class AddRecipientPayload(BaseModel):
     recipient_id: str
 
 @router.get("/")
-def list_groups(db: Session = Depends(get_db)):
-    return db.query(Group).all()
+def get_groups(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # The Magic Lock: Only return groups where user_id matches the logged-in user
+    groups = db.query(Group).filter(Group.user_id == current_user.id).all()
+    return groups
 
 @router.post("/")
-def create_group(payload: GroupCreate, db: Session = Depends(get_db)):
-    existing = db.query(Group).filter(Group.name == payload.name).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Group already exists")
-    
-    g = Group(name=payload.name, description=payload.description)
-    db.add(g)
+def create_group(payload: GroupCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Ensure new groups are stamped with the creator's ID!
+    new_group = Group(
+        name=payload.name, 
+        description=payload.description,
+        user_id=current_user.id  # CRITICAL!
+    )
+    db.add(new_group)
     db.commit()
-    db.refresh(g)
-    return g
+    db.refresh(new_group)
+    return new_group
 
 @router.post("/{group_id}/add_recipient")
 def add_recipient_to_group(group_id: str, payload: AddRecipientPayload, db: Session = Depends(get_db)):
