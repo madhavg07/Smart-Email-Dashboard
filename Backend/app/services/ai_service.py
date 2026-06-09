@@ -92,27 +92,33 @@ async def _call_openai(prompt: str, system: str) -> str:
             return data["choices"][0]["message"]["content"]
             
         raise ValueError("Groq API failed after 3 retries. The servers are currently too busy.")
+import re
+
+def ensure_html_links(text: str) -> str:
+    """Fallback: Forcefully convert any raw (https://...) into an HTML <a> tag so tracking works!"""
+    # Finds URLs inside parentheses (https://...) or raw URLs and wraps them in HTML
+    url_pattern = r'(?<!href=")(https?://[^\s<)\]]+)'
+    return re.sub(url_pattern, r'<a href="\1">\1</a>', text)
 
 async def personalize_email(subject: str, body: str, recipient_name: str, recipient_role: str = None, recipient_industry: str = None, recipient_company: str = None) -> dict:
-    prompt = f"Rewrite this email to personalize it for {recipient_name}.\n"
-    if recipient_role:
-        prompt += f"Role: {recipient_role}\n"
-    if recipient_industry:
-        prompt += f"Industry: {recipient_industry}\n"
-    if recipient_company:
-        prompt += f"Company: {recipient_company}\n"
+    prompt = f"Rewrite this FULL email to personalize it for {recipient_name}.\n"
+    if recipient_role: prompt += f"Role: {recipient_role}\n"
+    if recipient_industry: prompt += f"Industry: {recipient_industry}\n"
+    if recipient_company: prompt += f"Company: {recipient_company}\n"
         
     prompt += f"\nOriginal Subject: {subject}\nOriginal Body: {body}\n\nRespond ONLY with a valid JSON object containing 'subject' and 'body' keys."
     
     system = """
     You are an expert email marketer. Output strictly in JSON format.
     CRITICAL INSTRUCTIONS:
-    1. STRICT FACTUALITY: Do not invent company names, event names, or placeholders. If a detail is missing, omit it naturally.
-    2. BEAUTIFUL HTML FORMATTING: Format the output "body" as highly readable HTML using <p>, <br>, <ul>, <li>, and <strong>.
-    3. LINK CONSERVATION: Wrap EXISTING URLs in a proper <a href="..."> HTML tag. DO NOT invent fake links, DO NOT create Google Search links, and DO NOT add links to dates or normal text.
+    1. FULL LENGTH: You MUST rewrite the ENTIRE email body. Do not summarize or shorten it.
+    2. BEAUTIFUL HTML: Format the output "body" as highly readable HTML using <p>, <br>, <ul>, <li>, and <strong>.
+    3. LINK CONSERVATION: You MUST convert any raw URLs (https://...) into clickable HTML links using <a href="...">.
     """
     raw = await call_llm(prompt, system)
-    return extract_safe_json(raw)
+    data = extract_safe_json(raw)
+    data['body'] = ensure_html_links(data.get('body', '')) # Force link conversion
+    return data
 
 async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -> list:
     prompt = f"""
@@ -123,14 +129,17 @@ async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -
     Respond ONLY with a valid JSON array of objects. Each object must have "subject", "body", "angle", and "rationale".
     """
     system = """
-    You are an expert email marketer. Output strictly in JSON format.
+    You are a conversion copywriter. Output strictly in JSON array format.
     CRITICAL INSTRUCTIONS:
-    1. STRICT FACTUALITY: Do not invent company names, event names, or placeholders. If a detail is missing, omit it naturally.
-    2. BEAUTIFUL HTML FORMATTING: Format the output "body" as highly readable HTML using <p>, <br>, <ul>, <li>, and <strong>.
-    3. LINK CONSERVATION: Wrap EXISTING URLs in a proper <a href="..."> HTML tag. DO NOT invent fake links, DO NOT create Google Search links, and DO NOT add links to dates or normal text.
+    1. FULL LENGTH: The "body" MUST contain the FULL email. DO NOT summarize it into a single line. Keep all bullet points and details.
+    2. HTML FORMATTING: The "body" MUST be formatted as structured HTML using <p>, <ul>, <li>, and <strong>.
+    3. LINK CONSERVATION: You MUST wrap all URLs in <a href="..."> HTML tags.
     """
     raw = await call_llm(prompt, system)
-    return extract_safe_json(raw)
+    variants = extract_safe_json(raw)
+    for v in variants:
+        v['body'] = ensure_html_links(v.get('body', '')) # Force link conversion
+    return variants
 
 async def check_spam_score(subject: str, body: str) -> dict:
     prompt = f"""Analyze this email for spam filter risk. Be a spam filter expert.
