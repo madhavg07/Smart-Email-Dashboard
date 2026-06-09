@@ -3,6 +3,7 @@ import json
 import httpx
 import logging
 import asyncio
+import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -10,6 +11,24 @@ logger = logging.getLogger(__name__)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic")
+
+def extract_safe_json(raw_text: str):
+    """Bulletproof JSON extractor that survives AI hallucinations."""
+    try:
+        # Attempt 1: Standard cleaning
+        clean = raw_text.strip().strip("```json").strip("```").strip()
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        # Attempt 2: Use Regex to find the first { } or [ ] block
+        logger.warning("Standard JSON parse failed, attempting Regex extraction.")
+        match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except Exception as e:
+                logger.error(f"Regex JSON parse failed: {str(e)}")
+        
+        raise ValueError(f"AI failed to return valid JSON. Raw output: {raw_text}")
 
 async def call_llm(prompt: str, system: str = "") -> str:
     if AI_PROVIDER == "anthropic" and ANTHROPIC_API_KEY:
@@ -52,7 +71,7 @@ async def _call_openai(prompt: str, system: str) -> str:
     messages.append({"role": "user", "content": prompt})
 
     async with httpx.AsyncClient(timeout=30) as client:
-        # Loop to automatically retry up to 3 times if we hit a rate limit
+        # Retries for BOTH Rate Limits (429) AND Server Overloads (500, 502, 503)
         for attempt in range(3):
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
@@ -60,9 +79,8 @@ async def _call_openai(prompt: str, system: str) -> str:
                 json={"model": "llama-3.1-8b-instant", "messages": messages, "max_tokens": 1500},
             )
             
-            # If Groq says "Slow down!" (HTTP 429), wait 2.5 seconds and try again
-            if resp.status_code == 429:
-                logger.warning(f"Groq Rate Limit Hit. Sleeping for 2.5s (Attempt {attempt+1}/3)...")
+            if resp.status_code in [429, 500, 502, 503, 529]:
+                logger.warning(f"Groq API Overloaded/Rate Limited (HTTP {resp.status_code}). Retrying in 2.5s...")
                 await asyncio.sleep(2.5)
                 continue
                 
@@ -73,13 +91,10 @@ async def _call_openai(prompt: str, system: str) -> str:
             data = resp.json()
             return data["choices"][0]["message"]["content"]
             
-        # If it fails 3 times in a row, throw the error
-        raise ValueError("Groq API rate limit exceeded after 3 retries. Please wait 1 minute.")
+        raise ValueError("Groq API failed after 3 retries. The servers are currently too busy.")
 
 async def personalize_email(subject: str, body: str, recipient_name: str, recipient_role: str = None, recipient_industry: str = None, recipient_company: str = None) -> dict:
     prompt = f"Rewrite this email to personalize it for {recipient_name}.\n"
-    
-    # ONLY add these if they exist, preventing the AI from hallucinating!
     if recipient_role:
         prompt += f"Role: {recipient_role}\n"
     if recipient_industry:
@@ -93,12 +108,11 @@ async def personalize_email(subject: str, body: str, recipient_name: str, recipi
     You are an expert email marketer. Output strictly in JSON format.
     CRITICAL INSTRUCTIONS:
     1. STRICT FACTUALITY: Do not invent company names, event names, or placeholders. If a detail is missing, omit it naturally.
-    2. BEAUTIFUL HTML FORMATTING: The input may be messy plain text. Format the output "body" as highly readable HTML using <p>, <br>, <ul>, <li>, and <strong>.
-    3. LINK CONSERVATION: You MUST wrap any URLs in a proper <a href="..."> HTML tag. Never delete a link.
+    2. BEAUTIFUL HTML FORMATTING: Format the output "body" as highly readable HTML using <p>, <br>, <ul>, <li>, and <strong>.
+    3. LINK CONSERVATION: You MUST wrap any URLs in a proper <a href="..."> HTML tag.
     """
     raw = await call_llm(prompt, system)
-    raw = raw.strip().strip("```json").strip("```").strip()
-    return json.loads(raw)
+    return extract_safe_json(raw)
 
 async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -> list:
     prompt = f"""
@@ -111,43 +125,28 @@ async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -
     system = """
     You are a conversion copywriter. Output strictly in JSON array format.
     CRITICAL INSTRUCTIONS:
-    1. STRICT FACTUALITY: Never hallucinate missing details or use placeholders like 'TechCorp'.
+    1. STRICT FACTUALITY: Never hallucinate missing details or use placeholders.
     2. HTML FORMATTING: The "body" for each variant MUST be formatted as beautiful, structured HTML using <p>, <ul>, <li>, and <strong>.
     3. LINK CONSERVATION: You MUST retain any URLs or links from the original text by wrapping them in proper <a href="..."> HTML tags.
     """
     raw = await call_llm(prompt, system)
-    raw = raw.strip().strip("```json").strip("```").strip()
-    return json.loads(raw)
+    return extract_safe_json(raw)
 
 async def check_spam_score(subject: str, body: str) -> dict:
     prompt = f"""Analyze this email for spam filter risk. Be a spam filter expert.
     SUBJECT: {subject}
     BODY: {body[:1000]}
-    Check for:
-    - Spam trigger words (FREE, GUARANTEED, ACT NOW, etc.)
-    - Excessive capitalization
-    - Too many exclamation marks
-    - Missing unsubscribe language
-    - Suspicious link patterns
-    - Overly promotional language
-    - Subject line length (should be 30-60 chars)
-    Respond ONLY with valid JSON, no markdown:
+    Respond ONLY with valid JSON:
     {{"score": <0-10, where 10=definitely spam>, "issues": ["issue1", ...], "suggestions": ["fix1", ...]}}"""
     raw = await call_llm(prompt)
-    raw = raw.strip().strip("```json").strip("```").strip()
-    return json.loads(raw)
+    return extract_safe_json(raw)
 
 async def suggest_send_time(recipient_open_history: list) -> dict:
     if not recipient_open_history:
-        return {"recommended_hour": 9, "recommended_day": "Tuesday", "confidence": "low", "reason": "No history available, using industry defaults"}
+        return {"recommended_hour": 9, "recommended_day": "Tuesday", "confidence": "low", "reason": "No history available"}
     prompt = f"""Analyze these email open timestamps and suggest the best time to send future emails.
     Open timestamps (UTC): {json.dumps(recipient_open_history[:20])}
-    Identify:
-    - Most common hour of day they open emails
-    - Most common day of week
-    - Any patterns
     Respond ONLY with valid JSON:
     {{"recommended_hour": <0-23>, "recommended_day": "Monday|Tuesday|...", "confidence": "high|medium|low", "reason": "..."}}"""
     raw = await call_llm(prompt)
-    raw = raw.strip().strip("```json").strip("```").strip()
-    return json.loads(raw)
+    return extract_safe_json(raw)
