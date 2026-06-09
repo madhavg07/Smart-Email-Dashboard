@@ -13,18 +13,18 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic")
 
 def extract_safe_json(raw_text: str):
-    """Bulletproof JSON extractor that survives AI hallucinations."""
+    """Bulletproof JSON extractor that survives AI hallucinations and literal newlines."""
     try:
-        # Attempt 1: Standard cleaning
         clean = raw_text.strip().strip("```json").strip("```").strip()
-        return json.loads(clean)
+        # ADD strict=False right here!
+        return json.loads(clean, strict=False) 
     except json.JSONDecodeError:
-        # Attempt 2: Use Regex to find the first { } or [ ] block
         logger.warning("Standard JSON parse failed, attempting Regex extraction.")
         match = re.search(r'(\{.*\}|\[.*\])', raw_text, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(1))
+                # ADD strict=False here too!
+                return json.loads(match.group(1), strict=False)
             except Exception as e:
                 logger.error(f"Regex JSON parse failed: {str(e)}")
         
@@ -109,7 +109,7 @@ async def personalize_email(subject: str, body: str, recipient_name: str, recipi
     CRITICAL INSTRUCTIONS:
     1. STRICT FACTUALITY: Do not invent company names, event names, or placeholders. If a detail is missing, omit it naturally.
     2. BEAUTIFUL HTML FORMATTING: Format the output "body" as highly readable HTML using <p>, <br>, <ul>, <li>, and <strong>.
-    3. LINK CONSERVATION: You MUST wrap any URLs in a proper <a href="..."> HTML tag.
+    3. LINK CONSERVATION: Wrap EXISTING URLs in a proper <a href="..."> HTML tag. DO NOT invent fake links, DO NOT create Google Search links, and DO NOT add links to dates or normal text.
     """
     raw = await call_llm(prompt, system)
     return extract_safe_json(raw)
@@ -123,11 +123,11 @@ async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -
     Respond ONLY with a valid JSON array of objects. Each object must have "subject", "body", "angle", and "rationale".
     """
     system = """
-    You are a conversion copywriter. Output strictly in JSON array format.
+    You are an expert email marketer. Output strictly in JSON format.
     CRITICAL INSTRUCTIONS:
-    1. STRICT FACTUALITY: Never hallucinate missing details or use placeholders.
-    2. HTML FORMATTING: The "body" for each variant MUST be formatted as beautiful, structured HTML using <p>, <ul>, <li>, and <strong>.
-    3. LINK CONSERVATION: You MUST retain any URLs or links from the original text by wrapping them in proper <a href="..."> HTML tags.
+    1. STRICT FACTUALITY: Do not invent company names, event names, or placeholders. If a detail is missing, omit it naturally.
+    2. BEAUTIFUL HTML FORMATTING: Format the output "body" as highly readable HTML using <p>, <br>, <ul>, <li>, and <strong>.
+    3. LINK CONSERVATION: Wrap EXISTING URLs in a proper <a href="..."> HTML tag. DO NOT invent fake links, DO NOT create Google Search links, and DO NOT add links to dates or normal text.
     """
     raw = await call_llm(prompt, system)
     return extract_safe_json(raw)
