@@ -1,12 +1,3 @@
-"""
-Email Sending Service
-----------------------
-- Injects 1×1 tracking pixel into HTML
-- Rewrites links to go through click tracker
-- Supports SendGrid, AWS SES, SMTP
-- Used by Celery tasks for bulk sending
-"""
-
 import os
 import uuid
 import re
@@ -16,11 +7,11 @@ from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from app.models.database import ClickEvent
 
 logger = logging.getLogger(__name__)
 
-# Config — set in .env
-EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "smtp")  # smtp | sendgrid | ses
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "smtp")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
@@ -36,7 +27,6 @@ AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 
 def inject_tracking_pixel(html_body: str, tracking_token: str) -> str:
-    """Insert a 1×1 invisible tracking pixel before </body>."""
     pixel_url = f"{BASE_URL}/pixel/{tracking_token}"
     pixel_tag = f'<img src="{pixel_url}" width="1" height="1" style="display:none;border:0;" alt="" />'
 
@@ -47,30 +37,20 @@ def inject_tracking_pixel(html_body: str, tracking_token: str) -> str:
 
     return html_body
 
-import os
-import re
-import uuid
 
 def rewrite_links(html_body: str, send_log_id: str, recipient_id: str, campaign_id: str, db) -> str:
-    """Replace all href links with tracked redirect URLs."""
-    from app.models.database import ClickEvent
-    
-    BASE_URL = os.getenv("BASE_URL", "https://smart-email-dashboard.onrender.com")
-    
-    # We need a flag to know if we actually found any links to save
+    BASE_URL_TRACKING = os.getenv("BASE_URL", "https://smart-email-dashboard.onrender.com")
     links_added = False 
 
     def replace_link(match):
         nonlocal links_added
         original_url = match.group(1)
         
-        # Skip mailto, pixel urls, unsubscribe links
         if original_url.startswith("mailto:") or "/pixel/" in original_url or "/r/" in original_url:
             return match.group(0)
 
         click_token = str(uuid.uuid4())
 
-        # Create the database record
         click_record = ClickEvent(
             send_log_id=send_log_id,
             recipient_id=recipient_id,
@@ -79,27 +59,24 @@ def rewrite_links(html_body: str, send_log_id: str, recipient_id: str, campaign_
             click_token=click_token,
         )
         db.add(click_record)
-        links_added = True # Flag that we made a change!
+        links_added = True
 
-        tracked_url = f"{BASE_URL}/r/{click_token}"
+        tracked_url = f"{BASE_URL_TRACKING}/r/{click_token}"
         return f'href="{tracked_url}"'
 
-    # Run the regex replacement
-    html_body = re.sub(r'href="([^"]+)"', replace_link, html_body)
+    html_body = re.sub(r'href=[\'"]([^\'"]+)[\'"]', replace_link, html_body)
     
-    # --- CRITICAL FIX: SAVE TO DATABASE ---
     if links_added:
         try:
             db.commit()
         except Exception as e:
             db.rollback()
-            print(f"Failed to save tracking links: {e}")
-    # --------------------------------------
+            logger.error(f"Failed to save tracking links: {e}")
             
     return html_body
 
+
 def build_html_email(body_html: str, subject: str, recipient_name: str = "") -> str:
-    """Wrap the body in a clean, professional, plain-text-like email HTML template."""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -144,7 +121,6 @@ async def send_email_smtp(
     html_body: str,
     text_body: Optional[str] = None,
 ) -> bool:
-    """Send a single email via SMTP."""
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -175,17 +151,14 @@ async def send_email_sendgrid(
     html_body: str,
     text_body: Optional[str] = None,
 ) -> bool:
-    """Send via SendGrid HTTP API."""
     import httpx
     try:
-        # 1. Dynamically build the content array to avoid empty strings
         email_content = []
         if text_body:
             email_content.append({"type": "text/plain", "value": text_body})
             
         email_content.append({"type": "text/html", "value": html_body})
 
-        # 2. Build the payload safely
         payload = {
             "personalizations": [{"to": [{"email": to_email, "name": to_name}]}],
             "from": {"email": FROM_EMAIL, "name": FROM_NAME},
@@ -217,7 +190,6 @@ async def send_single_email(
     html_body: str,
     text_body: Optional[str] = None,
 ) -> bool:
-    """Dispatch email via configured provider."""
     if EMAIL_PROVIDER == "sendgrid":
         return await send_email_sendgrid(to_email, to_name, subject, html_body, text_body)
     else:

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def is_security_bot(user_agent: str) -> bool:
     if not user_agent:
         return True
-    bot_pattern = r'bot|crawler|spider|preview|scan|paloalto|barracuda|mimecast|zscaler|python|curl|wget|GoogleImageProxy'
+    bot_pattern = r'bot|crawler|spider|preview|scan|paloalto|barracuda|mimecast|zscaler|python|curl|wget'
     return bool(re.search(bot_pattern, user_agent, re.IGNORECASE))
 
 async def log_pixel_hit(token: str, request: Request):
@@ -46,11 +46,11 @@ async def log_pixel_hit(token: str, request: Request):
         try:
             from app.ml.scorer import update_seriousness_score
             update_seriousness_score(send_log.recipient_id, db)
-        except Exception as ml_err:
+        except Exception:
             pass
 
         db.commit()
-    except Exception as e:
+    except Exception:
         db.rollback()
     finally:
         db.close()
@@ -68,12 +68,10 @@ async def log_click_and_redirect(token: str, request: Request) -> str:
         user_agent = request.headers.get("user-agent", "")
 
         if not is_security_bot(user_agent):
-            # 1. Update Click Event Data
             click_event.ip_address = request.client.host if request.client else ""
             click_event.user_agent = user_agent
             click_event.clicked_at = datetime.utcnow()
 
-            # 2. Update Send Log (And force the Implied Open)
             send_log = db.query(SendLog).filter(SendLog.id == click_event.send_log_id).first()
             if send_log:
                 send_log.click_count += 1
@@ -81,39 +79,40 @@ async def log_click_and_redirect(token: str, request: Request) -> str:
                     send_log.open_count = 1
                     if not send_log.first_opened_at:
                         send_log.first_opened_at = datetime.utcnow()
+                    
+                    implied_open = OpenEvent(
+                        send_log_id=send_log.id,
+                        recipient_id=click_event.recipient_id,
+                        campaign_id=click_event.campaign_id,
+                        ip_address=request.client.host if request.client else "",
+                        user_agent=user_agent,
+                        opened_at=datetime.utcnow()
+                    )
+                    db.add(implied_open)
 
-            # 3. Update Recipient Totals
             recipient = db.query(Recipient).filter(Recipient.id == click_event.recipient_id).first()
             if recipient:
                 recipient.total_clicks = (recipient.total_clicks or 0) + 1
                 if send_log and send_log.open_count == 1:
                     recipient.total_opens = (recipient.total_opens or 0) + 1
 
-            # --- CRITICAL FIX: SAVE THE DATA NOW ---
-            # We lock in the tracking counts BEFORE touching the ML code!
             db.commit() 
-            # ---------------------------------------
 
-            # 4. Safely attempt the ML Score update
             try:
                 from app.ml.scorer import update_seriousness_score
                 update_seriousness_score(click_event.recipient_id, db)
                 db.commit()
-            except Exception as ml_err:
-                # If this fails, it only rolls back the ML score. Your click is already saved!
+            except Exception:
                 db.rollback() 
-                logger.error(f"ML Scorer failed: {ml_err}")
 
         return destination_url
-    except Exception as e:
+    except Exception:
         db.rollback()
-        logger.error(f"Error logging click: {e}")
         try:
             if click_event and click_event.original_url:
                 return click_event.original_url
-        except:
+        except Exception:
             pass
         return fallback_url
     finally:
-        db.close()     
-        
+        db.close()
