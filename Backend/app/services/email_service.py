@@ -47,20 +47,30 @@ def inject_tracking_pixel(html_body: str, tracking_token: str) -> str:
 
     return html_body
 
+import os
+import re
+import uuid
+
 def rewrite_links(html_body: str, send_log_id: str, recipient_id: str, campaign_id: str, db) -> str:
     """Replace all href links with tracked redirect URLs."""
     from app.models.database import ClickEvent
     
-    # NUCLEAR OPTION: Force the Live URL right here.
     BASE_URL = os.getenv("BASE_URL", "https://smart-email-dashboard.onrender.com")
+    
+    # We need a flag to know if we actually found any links to save
+    links_added = False 
 
     def replace_link(match):
+        nonlocal links_added
         original_url = match.group(1)
+        
+        # Skip mailto, pixel urls, unsubscribe links
         if original_url.startswith("mailto:") or "/pixel/" in original_url or "/r/" in original_url:
             return match.group(0)
 
         click_token = str(uuid.uuid4())
 
+        # Create the database record
         click_record = ClickEvent(
             send_log_id=send_log_id,
             recipient_id=recipient_id,
@@ -69,12 +79,23 @@ def rewrite_links(html_body: str, send_log_id: str, recipient_id: str, campaign_
             click_token=click_token,
         )
         db.add(click_record)
+        links_added = True # Flag that we made a change!
 
-        # Uses the forced BASE_URL
         tracked_url = f"{BASE_URL}/r/{click_token}"
         return f'href="{tracked_url}"'
 
+    # Run the regex replacement
     html_body = re.sub(r'href="([^"]+)"', replace_link, html_body)
+    
+    # --- CRITICAL FIX: SAVE TO DATABASE ---
+    if links_added:
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"Failed to save tracking links: {e}")
+    # --------------------------------------
+            
     return html_body
 
 def build_html_email(body_html: str, subject: str, recipient_name: str = "") -> str:
