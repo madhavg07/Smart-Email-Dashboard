@@ -68,37 +68,46 @@ async def log_click_and_redirect(token: str, request: Request) -> str:
         user_agent = request.headers.get("user-agent", "")
 
         if not is_security_bot(user_agent):
+            # 1. Update Click Event Data
             click_event.ip_address = request.client.host if request.client else ""
             click_event.user_agent = user_agent
             click_event.clicked_at = datetime.utcnow()
 
+            # 2. Update Send Log (And force the Implied Open)
             send_log = db.query(SendLog).filter(SendLog.id == click_event.send_log_id).first()
             if send_log:
                 send_log.click_count += 1
-
                 if send_log.open_count == 0:
                     send_log.open_count = 1
                     if not send_log.first_opened_at:
                         send_log.first_opened_at = datetime.utcnow()
 
+            # 3. Update Recipient Totals
             recipient = db.query(Recipient).filter(Recipient.id == click_event.recipient_id).first()
             if recipient:
                 recipient.total_clicks = (recipient.total_clicks or 0) + 1
-
                 if send_log and send_log.open_count == 1:
                     recipient.total_opens = (recipient.total_opens or 0) + 1
 
+            # --- CRITICAL FIX: SAVE THE DATA NOW ---
+            # We lock in the tracking counts BEFORE touching the ML code!
+            db.commit() 
+            # ---------------------------------------
+
+            # 4. Safely attempt the ML Score update
             try:
                 from app.ml.scorer import update_seriousness_score
                 update_seriousness_score(click_event.recipient_id, db)
+                db.commit()
             except Exception as ml_err:
-                pass
-
-            db.commit()
+                # If this fails, it only rolls back the ML score. Your click is already saved!
+                db.rollback() 
+                logger.error(f"ML Scorer failed: {ml_err}")
 
         return destination_url
     except Exception as e:
         db.rollback()
+        logger.error(f"Error logging click: {e}")
         try:
             if click_event and click_event.original_url:
                 return click_event.original_url
@@ -106,5 +115,5 @@ async def log_click_and_redirect(token: str, request: Request) -> str:
             pass
         return fallback_url
     finally:
-        db.close()
+        db.close()     
         
