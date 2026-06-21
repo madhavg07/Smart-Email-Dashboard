@@ -6,6 +6,7 @@ import {
 
 import { api, getToken, setToken, clearToken } from './api';
 import AuthPage from './pages/AuthPage';
+import SenderAccountManager from './pages/SenderAccountManager';
 
 const fmt = (n, d = 1) => (n ?? 0).toFixed(d);
 const pct = (n) => `${fmt(n)}%`;
@@ -739,6 +740,23 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
   );
 }
 
+const getUserIdFromToken = () => {
+  const token = getToken();
+  if (!token) return null;
+  
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    
+    // Strictly return the token's ID, or null if it doesn't exist
+    return payload.sub || payload.id || null; 
+    
+  } catch (e) {
+    // If the token is corrupted or fake, reject it completely
+    console.error("Failed to decode token");
+    return null; 
+  }
+};
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
   const [page, setPage] = useState("dashboard");
@@ -751,6 +769,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [smtpForm, setSmtpForm] = useState({ smtp_host: "smtp.gmail.com", smtp_port: 587, smtp_username: "", smtp_password: "" });
+  const userId = getUserIdFromToken();
 
   const handleLogout = () => {
     clearToken();
@@ -834,6 +853,7 @@ export default function App() {
           { id: "recipients", icon: "👥", label: "Recipients" },
           { id: "groups", icon: "📂", label: "Groups" },
           { id: "compose", icon: "✍️", label: "Smart Compose" },
+          { id: "senders", icon: "📬", label: "Sender Accounts" },
         ].map((n) => (
           <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 16px", borderRadius: 8, background: page === n.id ? "#1d4ed820" : "transparent", border: page === n.id ? "1px solid #1d4ed840" : "1px solid transparent", color: page === n.id ? "#60a5fa" : "#9ca3af", cursor: "pointer", textAlign: "left", fontSize: 14, fontWeight: page === n.id ? 600 : 400, transition: "all 0.15s" }}>
             <span style={{ fontSize: 18 }}>{n.icon}</span> {n.label}
@@ -856,6 +876,7 @@ export default function App() {
         {page === "recipients" && <RecipientsPage recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
         {page === "groups" && <GroupsPage groups={groups} recipients={recipients} onRefresh={loadData} showToast={showToast} />}
         {page === "compose" && <UnifiedAIFlowPage showToast={showToast} onRefresh={loadData} />}
+        {page === "senders" && <SenderAccountManager userId={userId} />}
         {showSettings && (
           <ModalOverlay title="Configure Your Outbound SMTP Server" onClose={() => setShowSettings(false)}>
             <form onSubmit={saveSettings} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
