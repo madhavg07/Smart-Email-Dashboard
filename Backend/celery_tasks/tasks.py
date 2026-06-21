@@ -8,6 +8,7 @@ import uuid
 import logging
 import ssl
 import smtplib
+import random
 from email.message import EmailMessage
 from celery import Celery
 from datetime import datetime
@@ -41,11 +42,9 @@ celery_app.conf.update(
 )
 
 @celery_app.task(bind=True, max_retries=3)
-def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize: bool = True):
-    from app.models.database import SessionLocal, Campaign, Recipient, SendLog, User
-    from app.services.email_service import inject_tracking_pixel, rewrite_links, build_html_email
-    from app.services.ai_service import personalize_email
-    from app.services.encryption import decrypt_password
+def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personalize: bool = True):
+    from app.models.database import SessionLocal, Campaign
+    from app.services.rotation_service import get_available_sender
 
     db = SessionLocal()
     try:
@@ -53,107 +52,128 @@ def send_campaign_task(self, campaign_id: str, recipient_ids: list, personalize:
         if not campaign:
             return
 
-        user = db.query(User).filter(User.id == campaign.user_id).first()
-        if not user or not user.smtp_host or not user.smtp_password:
-            campaign.status = "failed: Missing SMTP Credentials in Settings"
-            db.commit()
-            return
-
         campaign.status = "sending"
         db.commit()
 
-        try:
-            decrypted_password = decrypt_password(user.smtp_password)
-            context = ssl.create_default_context()
-            
-            if int(user.smtp_port) == 465:
-                server = smtplib.SMTP_SSL(user.smtp_host, int(user.smtp_port), context=context, timeout=15)
-            else:
-                server = smtplib.SMTP(user.smtp_host, int(user.smtp_port), timeout=15)
-                server.starttls(context=context)
-                
-            server.login(user.smtp_username, decrypted_password)
-            
-        except Exception as e:
-            campaign.status = f"failed: SMTP Login Error - {str(e)}"
-            db.commit()
-            logger.error(f"SMTP Connection failure: {str(e)}")
-            return
+        delay_seconds = 0
 
-        sent_count = 0
         for idx, rid in enumerate(recipient_ids):
-            try:
-                recipient = db.query(Recipient).filter(Recipient.id == rid).first()
-                if not recipient or recipient.is_suppressed:
-                    continue
+            sender = get_available_sender(db, campaign.user_id)
 
-                active_variant = "A"
-                active_subject = campaign.subject
-                active_body = campaign.body_html
+            if not sender:
+                db.close()
+                self.retry(countdown=86400)
+                return
 
-                if campaign.is_ab_test and (idx % 2 != 0):
-                    active_variant = "B"
-                    active_subject = campaign.subject_b
-                    active_body = campaign.body_html_b
+            jitter = random.randint(120, 360)
+            delay_seconds += jitter
 
-                if personalize and (recipient.role or recipient.industry):
-                    try:
-                        result = asyncio.run(personalize_email(
-                            subject=active_subject, body=active_body,
-                            recipient_name=recipient.name or recipient.email,
-                            recipient_role=recipient.role, recipient_industry=recipient.industry,
-                            recipient_company=recipient.company
-                        ))
-                        active_subject = result.get("subject", active_subject)
-                        active_body = result.get("body", active_body)
-                    except Exception:
-                        pass 
+            sender.sent_today += 1
+            db.commit()
 
-                tracking_token = str(uuid.uuid4())
-                
-                invisible_spaces = '\u200B' * (sent_count + 1)
-                unique_subject = active_subject + invisible_spaces
-
-                send_log = SendLog(
-                    campaign_id=campaign_id, recipient_id=recipient.id,
-                    tracking_token=tracking_token, 
-                    personalized_subject=unique_subject,
-                    personalized_body=active_body, sent_at=datetime.utcnow(),
-                    variant=active_variant 
-                )
-                db.add(send_log)
-                db.flush() 
-
-                full_html = build_html_email(active_body, unique_subject, recipient.name or "")
-                full_html = rewrite_links(full_html, send_log.id, recipient.id, campaign_id, db)
-                full_html = inject_tracking_pixel(full_html, tracking_token)
-                db.commit()
-
-                msg = EmailMessage()
-                msg['Subject'] = unique_subject
-                msg['From'] = user.smtp_username 
-                msg['To'] = recipient.email
-                msg.add_alternative(full_html, subtype='html')
-
-                server.send_message(msg)
-                
-                sent_count += 1
-                recipient.total_emails_received += 1
+            dispatch_email.apply_async(
+                args=[sender.id, rid, campaign_id, personalize, idx],
+                countdown=delay_seconds
+            )
             
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Failed to send to {recipient.email}: {str(e)}")
-
-        server.quit()
-
-        campaign.status = "sent"
-        campaign.total_sent = sent_count
-        campaign.sent_at = datetime.utcnow()
-        db.commit()
-        return {"sent": sent_count}
-        
     except Exception as e:
         db.rollback()
+        raise self.retry(exc=e, countdown=60)
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True, max_retries=3)
+def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, personalize: bool, idx: int):
+    from app.models.database import SessionLocal, Campaign, Recipient, SendLog, SenderAccount
+    from app.services.email_service import inject_tracking_pixel, rewrite_links, build_html_email
+    from app.services.ai_service import personalize_email
+    from app.services.encryption import decrypt_password
+
+    db = SessionLocal()
+    try:
+        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        recipient = db.query(Recipient).filter(Recipient.id == recipient_id).first()
+        sender = db.query(SenderAccount).filter(SenderAccount.id == sender_id).first()
+
+        if not campaign or not recipient or not sender or recipient.is_suppressed:
+            return
+
+        active_variant = "A"
+        active_subject = campaign.subject
+        active_body = campaign.body_html
+
+        if campaign.is_ab_test and (idx % 2 != 0):
+            active_variant = "B"
+            active_subject = campaign.subject_b
+            active_body = campaign.body_html_b
+
+        if personalize and (recipient.role or recipient.industry):
+            try:
+                result = asyncio.run(personalize_email(
+                    subject=active_subject, body=active_body,
+                    recipient_name=recipient.name or recipient.email,
+                    recipient_role=recipient.role, recipient_industry=recipient.industry,
+                    recipient_company=recipient.company
+                ))
+                active_subject = result.get("subject", active_subject)
+                active_body = result.get("body", active_body)
+            except Exception:
+                pass
+
+        tracking_token = str(uuid.uuid4())
+        invisible_spaces = '\u200B' * ((idx % 10) + 1)
+        unique_subject = active_subject + invisible_spaces
+
+        send_log = SendLog(
+            campaign_id=campaign_id, recipient_id=recipient.id,
+            tracking_token=tracking_token,
+            personalized_subject=unique_subject,
+            personalized_body=active_body, sent_at=datetime.utcnow(),
+            variant=active_variant
+        )
+        db.add(send_log)
+        db.flush()
+
+        full_html = build_html_email(active_body, unique_subject, recipient.name or "")
+        full_html = rewrite_links(full_html, send_log.id, recipient.id, campaign_id, db)
+        full_html = inject_tracking_pixel(full_html, tracking_token)
+        db.commit()
+
+        decrypted_password = decrypt_password(sender.credentials)
+        context = ssl.create_default_context()
+
+        smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=15)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
+            server.starttls(context=context)
+
+        server.login(sender.email_address, decrypted_password)
+
+        msg = EmailMessage()
+        msg['Subject'] = unique_subject
+        msg['From'] = sender.email_address
+        msg['To'] = recipient.email
+        msg.add_alternative(full_html, subtype='html')
+
+        server.send_message(msg)
+        server.quit()
+
+        recipient.total_emails_received += 1
+        campaign.total_sent = (campaign.total_sent or 0) + 1
+        campaign.sent_at = datetime.utcnow()
+        if campaign.status == "sending":
+            campaign.status = "sent"
+
+        db.commit()
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to send to {recipient_id}: {str(e)}")
         raise self.retry(exc=e, countdown=60)
     finally:
         db.close()

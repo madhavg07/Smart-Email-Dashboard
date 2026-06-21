@@ -60,7 +60,22 @@ class User(Base):
     smtp_username = Column(String, nullable=True)
     smtp_password = Column(String, nullable=True)
 
-# --- UPDATED EXISTING TABLES ---
+
+class SenderAccount(Base):
+    __tablename__ = "sender_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    
+    email_address = Column(String, unique=True)
+    provider = Column(String) # "smtp", "sendgrid", "gmail"
+    credentials = Column(String) # Encrypted password or API key
+    
+    # Rotation & Limit Management
+    daily_limit = Column(Integer, default=400) # Keep under 500 for Gmail
+    sent_today = Column(Integer, default=0)
+    last_reset = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
 
 class Campaign(Base):
     __tablename__ = "campaigns"
