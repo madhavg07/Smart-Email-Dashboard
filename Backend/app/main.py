@@ -4,8 +4,9 @@ from fastapi.responses import Response
 import base64
 import logging
 
+
 from app.api import groups
-from app.api import campaigns, recipients, tracking, ai_tools, analytics, webhooks, auth,settings, senders
+from app.api import campaigns, recipients, tracking, ai_tools, analytics, webhooks, auth,settings, senders, dashboard
 from app.models.database import engine, Base
 from app.services.auth_services import get_current_user
 from fastapi import Depends
@@ -44,6 +45,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(groups.router, prefix="/api/groups", tags=["groups"]) 
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(senders.router)
+app.include_router(dashboard.router)
 
 
 # 1x1 transparent PNG pixel (base64)

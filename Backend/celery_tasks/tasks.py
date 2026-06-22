@@ -13,6 +13,7 @@ from email.message import EmailMessage
 from celery import Celery
 from datetime import datetime
 from dotenv import load_dotenv
+from celery.schedules import crontab
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ celery_app.conf.update(
     }
 )
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=999)
 def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personalize: bool = True):
     from app.models.database import SessionLocal, Campaign
     from app.services.rotation_service import get_available_sender
@@ -83,12 +84,26 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
         db.close()
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=999)
 def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, personalize: bool, idx: int):
+    import pytz
+    from datetime import timedelta
     from app.models.database import SessionLocal, Campaign, Recipient, SendLog, SenderAccount
     from app.services.email_service import inject_tracking_pixel, rewrite_links, build_html_email
     from app.services.ai_service import personalize_email
     from app.services.encryption import decrypt_password
+
+    ist_timezone = pytz.timezone('Asia/Kolkata')
+    now_ist = datetime.now(ist_timezone)
+
+    if now_ist.hour < 9 or now_ist.hour >= 17:
+        if now_ist.hour >= 17:
+            next_9am = (now_ist + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+        else:
+            next_9am = now_ist.replace(hour=9, minute=0, second=0, microsecond=0)
+
+        seconds_to_wait = (next_9am - now_ist).total_seconds()
+        raise self.retry(countdown=seconds_to_wait)
 
     db = SessionLocal()
     try:
@@ -177,3 +192,47 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         raise self.retry(exc=e, countdown=60)
     finally:
         db.close()
+
+# 1. The Automated Suppression Task
+@celery_app.task(bind=True)
+def auto_suppress_inactive_students(self):
+    from app.models.database import SessionLocal, Recipient
+    db = SessionLocal()
+    
+    try:
+        # Fetch all students who are currently NOT suppressed
+        active_students = db.query(Recipient).filter(Recipient.is_suppressed == False).all()
+        suppressed_count = 0
+        
+        for student in active_students:
+            # Prevent dividing by zero and give them a grace period of at least 3 emails
+            if student.total_emails_received >= 3:
+                
+                # Calculate Engagement Score (Opens are worth 1 point, Clicks are worth 2)
+                # You can make this ML-based later, but this heuristic works perfectly for V1
+                engagement_score = (student.opens * 1) + (student.clicks * 2)
+                
+                # If they have received 3+ emails and their score is still 0...
+                if engagement_score == 0:
+                    student.is_suppressed = True
+                    suppressed_count += 1
+                    
+        db.commit()
+        print(f"Nightly Maintenance Complete: Suppressed {suppressed_count} inactive students.")
+        
+    except Exception as e:
+        db.rollback()
+        print(f"Error in suppression task: {e}")
+    finally:
+        db.close()
+
+# 2. The Alarm Clock (Celery Beat Schedule)
+# Add this right below your existing celery_app.conf.update(...) block
+celery_app.conf.beat_schedule = {
+    'run-suppression-every-midnight': {
+        'task': 'app.celery_tasks.tasks.auto_suppress_inactive_students',
+        # This schedule runs it at exactly midnight IST (18:30 UTC) every single day
+        'schedule': crontab(hour=18, minute=30), 
+    },
+}
+
