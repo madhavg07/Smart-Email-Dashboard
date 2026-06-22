@@ -757,6 +757,83 @@ const getUserIdFromToken = () => {
   }
 };
 
+export default function DashboardContainer() {
+  const [dashboardData, setDashboardData] = useState({
+    overview: null,
+    timeline: [],
+    pieData: [],
+    campaigns: []
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState(null);
+
+  useEffect(() => {
+    async function loadMetrics() {
+      try {
+        const token = localStorage.getItem("token");
+        const response = await fetch(`${API_BASE}/dashboard/analytics`, {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server returned status code: ${response.status}`);
+        }
+
+        const data = await response.json();
+        setDashboardData({
+          overview: data.overview,
+          timeline: data.timeline,
+          pieData: data.pieData,
+          campaigns: data.campaigns || []
+        });
+      } catch (error) {
+        console.error("Dashboard population error:", error);
+        setErrorMessage("Unable to sync runtime telemetry metrics.");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadMetrics();
+  }, []);
+
+  // Helper utility function for formatting percentage ratios
+  const formatPercentage = (value) => {
+    return `${(value * 100).toFixed(1)}%`;
+  };
+
+  if (isLoading) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", backgroundColor: "#0f172a", color: "#9ca3af" }}>
+        <div>Syncing analytical infrastructure variables...</div>
+      </div>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", backgroundColor: "#0f172a", color: "#f87171" }}>
+        <div>{errorMessage}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ backgroundColor: "#0f172a", minHeight: "100vh", padding: 24 }}>
+      <DashboardPage 
+        overview={dashboardData.overview} 
+        timeline={dashboardData.timeline} 
+        pieData={dashboardData.pieData} 
+        campaigns={dashboardData.campaigns}
+        pct={formatPercentage} // Pass utility downward to handle rendering bounds smoothly
+      />
+    </div>
+  );
+}
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!getToken());
   const [page, setPage] = useState("dashboard");
