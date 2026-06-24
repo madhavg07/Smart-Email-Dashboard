@@ -4,3 +4,13 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+# Celery Beat Schedule Files
+celerybeat-schedule
+celerybeat-schedule.db
+celerybeat-schedule-shm
+celerybeat-schedule-wal
+celerybeat.pid
+
+# Local SQLite Databases
+*.db
+*.sqlite3
