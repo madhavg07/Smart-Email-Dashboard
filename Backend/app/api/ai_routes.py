@@ -1,33 +1,39 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-from transformers import pipeline
+import requests
+import os
 
-router = APIRouter(tags=["AI Engagement Scorer"])
+router = APIRouter()
 
-# This loads the NLP model into your server's memory when it boots up
-print("Loading Hugging Face NLP Model...")
-nlp_scorer = pipeline("text-classification", model="distilbert-base-uncased-finetuned-sst-2-english")
-print("NLP Model Loaded successfully!")
+# Get this from Render Environment Variables later
+HF_API_TOKEN = os.getenv("HF_TOKEN") 
+API_URL = "https://api-inference.huggingface.co/models/distilbert-base-uncased-finetuned-sst-2-english"
 
-class SubjectRequest(BaseModel):
-    subject_line: str
+class SubjectLineRequest(BaseModel):
+    subject: str
 
-@router.post("/api/ai/score-subject")
-def score_subject(req: SubjectRequest):
-    # Pass the text to the model
-    result = nlp_scorer(req.subject_line)[0]
+@router.post("/analyze-subject")
+async def analyze_subject(request: SubjectLineRequest):
+    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+    payload = {"inputs": request.subject}
     
-    score = round(result['score'] * 100, 1)
-    label = result['label']
-    
-    # SST-2 classifies things as POSITIVE (Engaging) or NEGATIVE (Likely to be ignored)
-    is_good = True if label == "POSITIVE" else False
-    
-    # If it's a negative sentiment, we invert the score so a "99% negative" becomes a "1% engagement score"
-    if not is_good:
-        score = 100 - score
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload)
+        result = response.json()
         
-    return {
-        "score": score,
-        "is_optimal": score > 70
-    }
+        # Parse the Hugging Face API response
+        if isinstance(result, list) and len(result) > 0:
+            scores = result[0]
+            # Find the POSITIVE score
+            positive_score = next((item['score'] for item in scores if item['label'] == 'POSITIVE'), 0.5)
+            
+            # Convert to a 1-10 scale
+            final_score = round(positive_score * 10, 1)
+            
+            return {
+                "subject": request.subject,
+                "score": final_score,
+                "feedback": "Great! High engagement expected." if final_score > 7 else "Might need tweaking."
+            }
+    except Exception as e:
+        return {"score": 5.0, "feedback": "AI scoring temporarily unavailable."}
