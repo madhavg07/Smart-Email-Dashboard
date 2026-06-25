@@ -17,7 +17,7 @@ export default function SenderAccountManager() {
   const fetchAccounts = async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/senders`, {
+      const response = await fetch(`${API_BASE}/api/senders`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -36,7 +36,7 @@ export default function SenderAccountManager() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/senders/add`, {
+      const response = await fetch(`${API_BASE}/api/senders/add`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
