@@ -20,6 +20,11 @@ class AddSenderRequest(BaseModel):
     provider: str = "smtp"
     daily_limit: int = 400
 
+@router.get("/")
+def get_senders(db: Session = Depends(get_db)):
+    senders = db.query(SenderAccount).all()
+    return senders
+
 @router.post("/add")
 def add_sender_account(req: AddSenderRequest, db: Session = Depends(get_db)):
     # 1. Check if email already exists
