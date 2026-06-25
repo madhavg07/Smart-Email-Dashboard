@@ -83,3 +83,4 @@ watchfiles==1.2.0
 wcwidth==0.7.0
 websockets==16.0
 xgboost==3.3.0
+requests==2.34.0
