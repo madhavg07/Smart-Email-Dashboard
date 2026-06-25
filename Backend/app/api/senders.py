@@ -4,7 +4,7 @@ from app.models.database import SessionLocal, SenderAccount
 from app.services.encryption import encrypt_password
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/senders/", tags=["Senders"])
+router = APIRouter(prefix="/api/senders", tags=["Senders"])
 
 def get_db():
     db = SessionLocal()
