@@ -577,6 +577,32 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [hoveredVariant, setHoveredVariant] = useState(null);
   const [spamScore, setSpamScore] = useState(null);
+  
+  // NEW: State for the NLP Subject Scorer
+  const [aiScore, setAiScore] = useState(null);
+  const [isScoring, setIsScoring] = useState(false);
+
+  // NEW: Function to ping the Hugging Face API
+  const analyzeSubjectLine = async (text) => {
+    if (!text) {
+      setAiScore(null);
+      return;
+    }
+    
+    setIsScoring(true);
+    try {
+      // Using your existing api() wrapper to automatically handle tokens/URLs
+      const res = await api("/ai/score-subject", { 
+        method: "POST", 
+        body: JSON.stringify({ subject_line: text }) 
+      });
+      setAiScore(res);
+    } catch (e) { 
+      console.error("Failed to score subject line:", e); 
+    } finally {
+      setIsScoring(false);
+    }
+  };
 
   const runPersonalization = async () => {
     setLoading(true);
@@ -604,7 +630,7 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
     setSelectedVariant(variant);
     setLoading(true);
     try {
-      const targetBody = variant.body; // Check spam on the specific variant's body!
+      const targetBody = variant.body; 
       const res = await api("/ai/spam-check", { method: "POST", body: JSON.stringify({ subject: variant.subject, body: targetBody }) });
       setSpamScore(res);
     } catch (e) { showToast(e.message, "error"); }
@@ -615,7 +641,6 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
     if (!campaignName) return showToast("Please provide a Campaign Name at the top first", "error");
     setLoading(true);
     try {
-      // Build the final payload to match your database structure
       const payload = {
         name: campaignName,
         subject: personalized ? personalized.subject : baseForm.subject,
@@ -630,13 +655,13 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
       showToast("Saved to Drafts successfully!");
       onRefresh();
       
-      // Reset the form
       setBaseForm({ subject: "", body: "", name: "", role: "", company: "", industry: "" });
       setPersonalized(null);
       setVariants([]);
       setSelectedVariant(null);
       setSpamScore(null);
       setCampaignName("");
+      setAiScore(null); // Reset score
     } catch (e) { showToast(e.message, "error"); }
     setLoading(false);
   };
@@ -656,7 +681,6 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
     <div style={{ maxWidth: 800 }}>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", marginBottom: 6 }}>Unified AI Composer</h1>
       
-      {/* Moved Campaign Name to the top so you don't forget it! */}
       <input 
         style={{ ...inputStyle, fontSize: 16, fontWeight: 'bold', borderColor: "#3b82f6", marginBottom: 20 }} 
         placeholder="Name this Campaign (e.g., Q3 Outreach) - Required to Save" 
@@ -670,8 +694,49 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
           <input style={inputStyle} placeholder="Target Persona Name" value={baseForm.name} onChange={e => setBaseForm({ ...baseForm, name: e.target.value })} />
           <input style={inputStyle} placeholder="Role (e.g., CEO)" value={baseForm.role} onChange={e => setBaseForm({ ...baseForm, role: e.target.value })} />
         </div>
-        <input style={inputStyle} placeholder="Base Subject" value={baseForm.subject} onChange={e => setBaseForm({ ...baseForm, subject: e.target.value })} />
+        
+        {/* MODIFIED: Subject Line Input with AI Scoring Integration */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#9ca3af", marginLeft: 2 }}>Base Subject</label>
+            
+            {isScoring ? (
+              <span style={{ fontSize: 12, color: "#60a5fa" }}>Analyzing... 🧠</span>
+            ) : aiScore ? (
+              <span style={{ 
+                fontSize: 11, 
+                fontWeight: "bold", 
+                padding: "2px 8px", 
+                borderRadius: 12,
+                background: aiScore.is_optimal ? "#166534" : "#991b1b",
+                color: "#fff" 
+              }}>
+                {aiScore.is_optimal ? "🔥 Great Subject" : "⚠️ Low Engagement"} ({aiScore.score}%)
+              </span>
+            ) : null}
+          </div>
+          
+          <input 
+            style={{ 
+              ...inputStyle, 
+              marginBottom: 0,
+              border: aiScore ? (aiScore.is_optimal ? "1px solid #22c55e" : "1px solid #ef4444") : "1px solid #1f2937",
+            }} 
+            placeholder="Enter an engaging subject line..." 
+            value={baseForm.subject} 
+            onChange={e => setBaseForm({ ...baseForm, subject: e.target.value })} 
+            onBlur={() => analyzeSubjectLine(baseForm.subject)} // Analyzes when user clicks outside the input
+          />
+          
+          {aiScore && !aiScore.is_optimal && (
+            <div style={{ fontSize: 11, color: "#f87171", marginTop: 6, marginLeft: 2 }}>
+              Try adding a sense of urgency, a question, or an actionable hook to increase open rates.
+            </div>
+          )}
+        </div>
+
         <textarea style={{ ...inputStyle, minHeight: 100 }} placeholder="Paste raw text here..." value={baseForm.body} onChange={e => setBaseForm({ ...baseForm, body: e.target.value })} />
+        
         <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
           <button onClick={runPersonalization} disabled={loading || !baseForm.subject || !baseForm.body} style={{ background: "#1d4ed8", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>Personalize Context</button>
         </div>
@@ -680,8 +745,6 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
       <div style={sectionStyle(personalized !== null)}>
         <h3 style={{ marginTop: 0, color: "#60a5fa" }}>2. AI Personalized Output</h3>
         <div style={{ color: "#d1d5db", fontSize: 14, marginBottom: 8 }}><strong>Subject:</strong> {personalized?.subject}</div>
-        
-        {/* Render the preserved HTML beautifully */}
         <div style={{ background: "#ffffff", color: "#000", padding: 15, borderRadius: 8, border: "1px solid #d1d5db" }} dangerouslySetInnerHTML={{ __html: personalized?.body }} />
         
         <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
@@ -712,7 +775,6 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
               <div style={{ color: "#f9fafb", fontWeight: 600 }}>{v.subject}</div>
               <div style={{ color: "#6b7280", fontSize: 12, marginBottom: selectedVariant === v ? 12 : 0 }}>{v.rationale}</div>
               
-              {/* Show the formatted body preview ONLY when selected */}
               {selectedVariant === v && (
                 <div style={{ borderTop: "1px solid #3b82f6", paddingTop: 12, marginTop: 8 }}>
                    <div style={{ color: "#9ca3af", fontSize: 11, marginBottom: 4, textTransform: "uppercase" }}>Formatting Preview:</div>
