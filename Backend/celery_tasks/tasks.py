@@ -227,12 +227,57 @@ def auto_suppress_inactive_students(self):
         db.close()
 
 # 2. The Alarm Clock (Celery Beat Schedule)
-# Add this right below your existing celery_app.conf.update(...) block
 celery_app.conf.beat_schedule = {
+    # Task 1: Runs every single night at midnight IST to suppress users
     'run-suppression-every-midnight': {
         'task': 'app.celery_tasks.tasks.auto_suppress_inactive_students',
-        # This schedule runs it at exactly midnight IST (18:30 UTC) every single day
         'schedule': crontab(hour=18, minute=30), 
+    },
+    # Task 2: Runs every Sunday at midnight UTC to keep the ML model fresh
+    'weekly-model-retraining': {
+        'task': 'app.celery_tasks.tasks.auto_retrain_suppression_model',
+        'schedule': crontab(hour=0, minute=0, day_of_week='sunday'),
     },
 }
 
+@celery_app.task(bind=True)
+def auto_retrain_suppression_model(self):
+    import pandas as pd
+    import xgboost as xgb
+    import joblib
+    from app.models.database import SessionLocal, Recipient
+    
+    db = SessionLocal()
+    try:
+        logger.info("Starting automatic retraining of XGBoost suppression model...")
+        recipients = db.query(Recipient).all()
+        
+        # If there's not enough data yet, don't crash the pipeline
+        if len(recipients) < 5:
+            logger.warning("Not enough recipient data to retrain model. Skipping.")
+            return
+            
+        data = []
+        for r in recipients:
+            data.append({
+                'total_received': r.total_emails_received,
+                'opens': r.opens,
+                'clicks': r.clicks,
+                'is_suppressed': r.is_suppressed
+            })
+            
+        df = pd.DataFrame(data)
+        X = df[['total_received', 'opens', 'clicks']]
+        y = df['is_suppressed']
+        
+        # Train and overwrite the old pkl file with fresh data
+        model = xgb.XGBClassifier(eval_metric='logloss')
+        model.fit(X, y)
+        
+        joblib.dump(model, 'xgboost_suppression_model.pkl')
+        logger.info("XGBoost model retrained and updated successfully!")
+        
+    except Exception as e:
+        logger.error(f"Error during model retraining: {str(e)}")
+    finally:
+        db.close()
