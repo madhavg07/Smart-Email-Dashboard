@@ -2,6 +2,21 @@ import React, { useState, useEffect } from "react";
 
 const API_BASE = "https://smart-email-dashboard.onrender.com";
 
+// --- THE DECODER FUNCTION ---
+// This cracks open the FastAPI token to get the real user ID
+const decodeJWT = (token) => {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(jsonPayload);
+  } catch (error) {
+    return null;
+  }
+};
+
 export default function SenderAccountManager() {
   const [emailAddress, setEmailAddress] = useState("");
   const [appPassword, setAppPassword] = useState("");
@@ -36,6 +51,14 @@ export default function SenderAccountManager() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
+      
+      // Unpack the token to find the user's ID
+      const decoded = decodeJWT(token);
+      
+      // FastAPI usually stores the user identifier in the "sub" (subject) field
+      // If it fails, we fallback to a safe string to prevent frontend crashing
+      const realUserId = decoded && decoded.sub ? String(decoded.sub) : "unknown";
+
       const response = await fetch(`${API_BASE}/api/senders/add`, {
         method: "POST",
         headers: {
@@ -43,8 +66,9 @@ export default function SenderAccountManager() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          user_id: realUserId, // Send the real ID to the database!
           email_address: emailAddress,
-          app_password: appPassword,
+          password_or_api_key: appPassword,
           provider: provider,
           daily_limit: parseInt(dailyLimit),
         }),
@@ -55,6 +79,9 @@ export default function SenderAccountManager() {
         setAppPassword("");
         setDailyLimit(400);
         fetchAccounts();
+      } else {
+        const err = await response.json();
+        console.error("Backend Error:", err);
       }
     } catch (error) {
       console.error(error);

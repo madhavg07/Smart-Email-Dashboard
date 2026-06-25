@@ -4,7 +4,7 @@ from app.models.database import SessionLocal, SenderAccount
 from app.services.encryption import encrypt_password
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/senders", tags=["Senders"])
+router = APIRouter(prefix="/api/senders/", tags=["Senders"])
 
 def get_db():
     db = SessionLocal()
@@ -20,12 +20,12 @@ class AddSenderRequest(BaseModel):
     provider: str = "smtp"
     daily_limit: int = 400
 
-@router.get("/")
+@router.get("")
 def get_senders(db: Session = Depends(get_db)):
     senders = db.query(SenderAccount).all()
     return senders
 
-@router.post("/add")
+@router.post("add")
 def add_sender_account(req: AddSenderRequest, db: Session = Depends(get_db)):
     # 1. Check if email already exists
     existing = db.query(SenderAccount).filter(SenderAccount.email_address == req.email_address).first()
