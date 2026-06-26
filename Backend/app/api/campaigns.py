@@ -91,8 +91,8 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
     target_ids = list(final_recipient_ids)
 
     try:
-        from celery_tasks.tasks import send_campaign_task
-        send_campaign_task.delay(campaign_id, target_ids, personalize)
+        from celery_tasks.tasks import process_campaign_queue
+        process_campaign_queue.delay(campaign_id, target_ids, personalize)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to queue send task: {e}")
 
