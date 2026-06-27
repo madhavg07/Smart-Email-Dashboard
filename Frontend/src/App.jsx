@@ -8,6 +8,9 @@ import { api, getToken, setToken, clearToken } from './api';
 import AuthPage from './pages/AuthPage';
 import SenderAccountManager from './pages/SenderAccountManager';
 
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
+
 const fmt = (n, d = 1) => (n ?? 0).toFixed(d);
 const pct = (n) => `${fmt(n)}%`;
 const scoreColor = (s) =>
@@ -428,7 +431,11 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
           <div style={{ background: "#1f2937", padding: 15, borderRadius: 8, marginBottom: 15 }}>
             <h4 style={{ margin: "0 0 10px 0", color: "#9ca3af" }}>Variant A (Standard)</h4>
             <input placeholder="Subject Line" value={newCampSubject} onChange={e => setNewCampSubject(e.target.value)} style={{ width: "100%", padding: 12, marginBottom: 10, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }} />
-            <textarea placeholder="HTML Body" value={newCampBody} onChange={e => setNewCampBody(e.target.value)} style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", minHeight: 120 }} />
+            
+            <div style={{ background: "#fff", color: "#000", borderRadius: 8, overflow: "hidden" }}>
+              <ReactQuill theme="snow" value={newCampBody} onChange={setNewCampBody} style={{ minHeight: 120 }} />
+            </div>
+
           </div>
           <label style={{ display: "flex", alignItems: "center", gap: 10, color: "#d1d5db", marginBottom: 15, cursor: "pointer" }}>
             <input type="checkbox" checked={isABTest} onChange={(e) => setIsABTest(e.target.checked)} style={{ accentColor: "#3b82f6", width: 18, height: 18 }} />
@@ -438,7 +445,11 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
             <div style={{ background: "#1f2937", padding: 15, borderRadius: 8, marginBottom: 15, borderLeft: "4px solid #3b82f6" }}>
               <h4 style={{ margin: "0 0 10px 0", color: "#60a5fa" }}>Variant B (Test Group)</h4>
               <input placeholder="Variant B Subject Line" value={subjectB} onChange={e => setSubjectB(e.target.value)} style={{ width: "100%", padding: 12, marginBottom: 10, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }} />
-              <textarea placeholder="Variant B HTML Body" value={bodyHtmlB} onChange={e => setBodyHtmlB(e.target.value)} style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", minHeight: 120 }} />
+              
+              <div style={{ background: "#fff", color: "#000", borderRadius: 8, overflow: "hidden" }}>
+                <ReactQuill theme="snow" value={bodyHtmlB} onChange={setBodyHtmlB} style={{ minHeight: 120 }} />
+              </div>
+
             </div>
           )}
           <button onClick={createCampaign} style={{ width: "100%", background: "#10b981", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>Save Campaign</button>
@@ -467,13 +478,9 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
             </div>
 
             {isEditing ? (
-              <div 
-                contentEditable 
-                suppressContentEditableWarning={true}
-                style={{ width: "100%", padding: 16, borderRadius: 8, border: "2px solid #3b82f6", background: "#ffffff", color: "#000", minHeight: 200, outline: "none", overflowY: "auto", fontFamily: "inherit" }} 
-                dangerouslySetInnerHTML={{ __html: editedContent }}
-                onBlur={(e) => setEditedContent(e.target.innerHTML)}
-              />
+              <div style={{ background: "#fff", color: "#000", borderRadius: 8, overflow: "hidden" }}>
+                <ReactQuill theme="snow" value={editedContent} onChange={setEditedContent} style={{ minHeight: 200 }} />
+              </div>
             ) : (
               <div style={{ background: "#ffffff", color: "#000", padding: 20, borderRadius: 8, border: "1px solid #d1d5db", maxHeight: "40vh", overflowY: "auto" }} dangerouslySetInnerHTML={{ __html: viewCampaign.body_html }} />
             )}
