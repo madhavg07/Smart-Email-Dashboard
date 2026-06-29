@@ -43,7 +43,7 @@ celery_app.conf.update(
 )
 
 @celery_app.task(bind=True, max_retries=999)
-def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personalize: bool = True):
+def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personalize: bool = True, sender_name: str = None):
     from app.models.database import SessionLocal, Campaign
     from app.services.rotation_service import get_available_sender
 
@@ -73,7 +73,7 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
             db.commit()
 
             dispatch_email.apply_async(
-                args=[sender.id, rid, campaign_id, personalize, idx],
+                args=[sender.id, rid, campaign_id, personalize, idx, sender_name],
                 countdown=delay_seconds
             )
             
@@ -83,15 +83,15 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
     finally:
         db.close()
 
-
 @celery_app.task(bind=True, max_retries=999)
-def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, personalize: bool, idx: int):
+def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, personalize: bool, idx: int, sender_name: str = None):
     import pytz
     from datetime import timedelta
     from app.models.database import SessionLocal, Campaign, Recipient, SendLog, SenderAccount
     from app.services.email_service import inject_tracking_pixel, rewrite_links, build_html_email
     from app.services.ai_service import personalize_email
     from app.services.encryption import decrypt_password
+    from email.utils import formataddr
 
     ist_timezone = pytz.timezone('Asia/Kolkata')
     now_ist = datetime.now(ist_timezone)
@@ -171,7 +171,10 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
 
         msg = EmailMessage()
         msg['Subject'] = unique_subject
-        msg['From'] = sender.email_address
+        if sender_name:
+            msg['From'] = formataddr((sender_name, sender.email_address))
+        else:
+            msg['From'] = sender.email_address
         msg['To'] = recipient.email
         msg.add_alternative(full_html, subtype='html')
 

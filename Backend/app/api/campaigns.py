@@ -53,6 +53,7 @@ class SendRequest(BaseModel):
     recipient_ids: List[str] | None = []
     group_ids: List[str] | None = []
     personalize: bool = True
+    sender_name: Optional[str] = None
 
 @router.post("/{campaign_id}/send")
 async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -63,9 +64,11 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
 
     final_recipient_ids = set()
     personalize = True
+    sender_name = None
 
     if payload:
         personalize = payload.personalize
+        sender_name = payload.sender_name
         if payload.recipient_ids:
             for rid in payload.recipient_ids:
                 final_recipient_ids.add(rid)
@@ -92,7 +95,7 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
 
     try:
         from celery_tasks.tasks import process_campaign_queue
-        process_campaign_queue.delay(campaign_id, target_ids, personalize)
+        process_campaign_queue.delay(campaign_id, target_ids, personalize, sender_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to queue send task: {e}")
 
