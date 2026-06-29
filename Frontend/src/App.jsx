@@ -338,6 +338,8 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
 
+  const [sendSenderName, setSendSenderName] = useState("");
+
   const sortedCampaigns = [...campaigns].sort((a, b) => {
     const dateA = new Date(a.sent_at || a.created_at || 0);
     const dateB = new Date(b.sent_at || b.created_at || 0);
@@ -373,10 +375,11 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     try {
       await api(`/campaigns/${sendModal}/send`, { 
         method: "POST", 
-        body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: true }) 
+        body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: true, sender_name: sendSenderName }) 
       });
       showToast("Campaign queued for sending!");
       setSendModal(null);
+      setSendSenderName("");
       onRefresh();
     } catch (e) { showToast(e.message, "error"); }
     setSending(false);
@@ -537,6 +540,15 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
                 ))}
               </div>
             </div>
+          </div>
+          <div style={{ marginTop: 20 }}>
+            <h4 style={{ color: "#d1d5db", marginTop: 0 }}>Sender Identity</h4>
+            <input 
+              placeholder="Authority Name (e.g. University Placement Cell)" 
+              value={sendSenderName} 
+              onChange={e => setSendSenderName(e.target.value)} 
+              style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }} 
+            />
           </div>
           <button onClick={executeSend} disabled={sending} style={{ marginTop: 20, width: "100%", background: "#22c55e", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
             {sending ? "Processing..." : "Confirm & Send Campaign"}
