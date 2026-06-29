@@ -56,7 +56,7 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
         campaign.status = "sending"
         db.commit()
 
-        delay_seconds = 0
+        delay_trackers = {}
 
         for idx, rid in enumerate(recipient_ids):
             sender = get_available_sender(db, campaign.user_id)
@@ -66,15 +66,18 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
                 self.retry(countdown=86400)
                 return
 
+            if sender.id not in delay_trackers:
+                delay_trackers[sender.id] = 0
+
             jitter = random.randint(120, 360)
-            delay_seconds += jitter
+            delay_trackers[sender.id] += jitter
 
             sender.sent_today += 1
             db.commit()
 
             dispatch_email.apply_async(
                 args=[sender.id, rid, campaign_id, personalize, idx, sender_name],
-                countdown=delay_seconds
+                countdown=delay_trackers[sender.id]
             )
             
     except Exception as e:

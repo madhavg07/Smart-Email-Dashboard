@@ -339,6 +339,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const [editedContent, setEditedContent] = useState("");
 
   const [sendSenderName, setSendSenderName] = useState("");
+  const [useAIPersonalization, setUseAIPersonalization] = useState(false);
 
   const sortedCampaigns = [...campaigns].sort((a, b) => {
     const dateA = new Date(a.sent_at || a.created_at || 0);
@@ -371,15 +372,17 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   };
 
   const executeSend = async () => {
+    if (sending) return;
     setSending(true);
     try {
       await api(`/campaigns/${sendModal}/send`, { 
         method: "POST", 
-        body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: true, sender_name: sendSenderName }) 
+        body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: useAIPersonalization, sender_name: sendSenderName }) 
       });
       showToast("Campaign queued for sending!");
       setSendModal(null);
       setSendSenderName("");
+      if (typeof setUseAIPersonalization === 'function') setUseAIPersonalization(false);
       onRefresh();
     } catch (e) { showToast(e.message, "error"); }
     setSending(false);
@@ -540,6 +543,17 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
                 ))}
               </div>
             </div>
+          </div>
+          <div style={{ marginTop: 20 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, color: "#d1d5db", cursor: "pointer" }}>
+              <input 
+                type="checkbox" 
+                checked={useAIPersonalization} 
+                onChange={(e) => setUseAIPersonalization(e.target.checked)} 
+                style={{ accentColor: "#3b82f6", width: 18, height: 18 }} 
+              />
+              Run AI Personalization before sending (Auto-injects names/roles)
+            </label>
           </div>
           <div style={{ marginTop: 20 }}>
             <h4 style={{ color: "#d1d5db", marginTop: 0 }}>Sender Identity</h4>

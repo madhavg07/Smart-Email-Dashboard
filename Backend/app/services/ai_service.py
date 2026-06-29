@@ -108,12 +108,16 @@ async def personalize_email(subject: str, body: str, recipient_name: str, recipi
         
     prompt += f"\nOriginal Subject: {subject}\nOriginal Body: {body}\n\nRespond ONLY with a valid JSON object containing 'subject' and 'body' keys."
     
-    system = """
-    You are an expert email marketer. Output strictly in JSON format.
-    CRITICAL INSTRUCTIONS:
-    1. FULL LENGTH: You MUST rewrite the ENTIRE email body. Do not summarize or shorten it.
-    2. BEAUTIFUL HTML: Format the output "body" as highly readable HTML using <p>, <br>, <ul>, <li>, and <strong>.
-    3. LINK CONSERVATION: You MUST convert any raw URLs (https://...) into clickable HTML links using <a href="...">.
+    system = f"""
+    You are a professional email assistant. Your job is to slightly personalize the provided email draft for a specific recipient.
+
+    Here are the strict rules for the identities:
+    1. THE RECIPIENT: Their name is {recipient_name}. If provided, they work at {recipient_company} as a {recipient_role}.
+    2. THE SENDER: You represent the sender. You DO NOT work at {recipient_company}. 
+    3. RULE: Never start the email with "Greetings from {recipient_company}". 
+    4. RULE: Do not change the core meaning or links of the original draft.
+
+    If you mention their company, do it naturally in the context of the recipient (e.g., "I hope things are going well at {recipient_company}").
     """
     raw = await call_llm(prompt, system)
     data = extract_safe_json(raw)
