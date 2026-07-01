@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -192,8 +192,12 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [saving, setSaving] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
+  
+  const fileInputRef = useRef(null);
 
-  const safeRecipients = recipients || [];
+  const safeRecipients = Array.isArray(recipients) ? recipients : (recipients?.data || []);
+  const totalCount = recipients?.total || safeRecipients.length;
+
   const filtered = safeRecipients.filter(r => {
     if (filter === "suppressed" && !r.is_suppressed) return false;
     if (filter === "hot" && (r.seriousness_score || 0) < 0.75) return false;
@@ -233,9 +237,54 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
     finally { setSaving(false); }
   };
 
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    setSaving(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("https://smart-email-dashboard.onrender.com/api/recipients/upload-csv", {
+        method: "POST",
+        body: formData
+      });
+      
+      const data = await response.json();
+      showToast(data.message || "CSV Uploaded", "success");
+      onRefresh();
+    } catch (e) {
+      showToast("Failed to upload CSV", "error");
+    } finally {
+      setSaving(false);
+      event.target.value = null;
+    }
+  };
+
   return (
     <div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>Recipients</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>
+          Recipients <span style={{ fontSize: 16, color: "#6b7280", fontWeight: 500 }}>({totalCount} Total)</span>
+        </h1>
+        
+        <div>
+          <input 
+            type="file" 
+            accept=".csv" 
+            ref={fileInputRef} 
+            onChange={handleFileUpload} 
+            style={{ display: "none" }} 
+          />
+          <button 
+            onClick={() => fileInputRef.current.click()} 
+            disabled={saving}
+            style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}>
+            {saving ? "Uploading..." : "Upload CSV"}
+          </button>
+        </div>
+      </div>
 
       {showGroupModal && (
         <ModalOverlay title="Assign Recipient to Groups" onClose={() => setShowGroupModal(false)}>
@@ -297,7 +346,9 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
                     <div style={{ color: "#6b7280", fontSize: 12 }}>{r.email}</div>
                   </td>
                   <td style={{ padding: "12px 16px", color: "#9ca3af", maxWidth: 150 }}>{rGroups.length > 0 ? rGroups.join(", ") : "—"}</td>
-                  <td style={{ padding: "12px 16px", color: scoreColor(r.seriousness_score || 0) }}>{scoreLabel(r.seriousness_score || 0)}</td>
+                  <td style={{ padding: "12px 16px", color: r.seriousness_score >= 0.75 ? "#4ade80" : "#9ca3af" }}>
+                    {r.seriousness_score >= 0.75 ? "Hot" : "Standard"}
+                  </td>
                   <td style={{ padding: "12px 16px", color: "#9ca3af" }}>
                     <div style={{ color: "#4ade80" }}>{r.total_opens || 0} Opens</div>
                     <div style={{ color: "#a78bfa" }}>{r.total_clicks || 0} Clicks</div>

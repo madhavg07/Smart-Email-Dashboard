@@ -2,7 +2,7 @@
 
 Provides listing and creation of recipients using the project's SQLAlchemy models.
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 import csv
@@ -23,18 +23,28 @@ class RecipientCreate(BaseModel):
     group_ids: list[str] | None = []
     new_group_name: str | None = None
 
-
 @router.get("/")
-def list_recipients(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # SECURITY: Only fetch this user's recipients
-    recs = db.query(Recipient).filter(Recipient.user_id == current_user.id).all()
+def list_recipients(
+    skip: int = Query(0, description="How many records to skip"),
+    limit: int = Query(100, le=500, description="How many records to return (max 500)"),
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
+    # 1. Get the total count so your frontend knows how many pages there are
+    total_count = db.query(Recipient).filter(Recipient.user_id == current_user.id).count()
     
-    for r in recs:
-        r.total_opens = db.query(SendLog).filter(SendLog.recipient_id == r.id, SendLog.open_count > 0).count()
-        r.total_clicks = db.query(SendLog).filter(SendLog.recipient_id == r.id, SendLog.click_count > 0).count()
+    # 2. Fetch ONLY the requested chunk using .offset() and .limit()
+    recipients = db.query(Recipient)\
+        .filter(Recipient.user_id == current_user.id)\
+        .offset(skip)\
+        .limit(limit)\
+        .all()
         
-    return recs
-
+    return {
+        "total": total_count,
+        "page_size": len(recipients),
+        "data": recipients
+    }
 
 @router.post("/")
 def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -114,33 +124,35 @@ def suppress_recipient(recipient_id: str, suppress: bool = False, db: Session = 
     return {"id": recipient.id, "is_suppressed": recipient.is_suppressed}
 
 
-@router.post("/upload")
-async def upload_recipients_csv(file: UploadFile = File(...), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Bulk upload recipients via CSV. Expected columns: email, name, role, company, cluster"""
+@router.post("/upload-csv")
+async def upload_recipients_csv(
+    file: UploadFile = File(...), 
+    current_user: User = Depends(get_current_user)
+):
+    # Read the file data into memory
     contents = await file.read()
-    decoded = contents.decode('utf-8-sig') # Handle BOM
-    reader = csv.DictReader(io.StringIO(decoded))
     
-    added_count = 0
-    for row in reader:
-        email = row.get("email")
-        if not email:
-            continue
+    # Decode the bytes into a string
+    decoded_file = contents.decode('utf-8')
+    
+    # Parse the CSV to extract just the emails and names
+    csv_reader = csv.reader(io.StringIO(decoded_file))
+    next(csv_reader, None) # Skip the header row
+    
+    contacts_data = []
+    for row in csv_reader:
+        if len(row) > 0:
+            contacts_data.append({
+                "email": row[0].strip(), # Assuming email is in the first column
+                "name": row[1].strip() if len(row) > 1 else ""
+            })
             
-        # SECURITY: Check for duplicates within THIS user's list only
-        existing = db.query(Recipient).filter(Recipient.email == email, Recipient.user_id == current_user.id).first()
-        if not existing:
-            # SECURITY: Assign the uploaded recipient to this user
-            new_rep = Recipient(
-                user_id=current_user.id,
-                email=email,
-                name=row.get("name", ""),
-                role=row.get("role", ""),
-                company=row.get("company", ""),
-                metadata_={"cluster": row.get("cluster", "Default Group")} # Grouping feature!
-            )
-            db.add(new_rep)
-            added_count += 1
-            
-    db.commit()
-    return {"message": f"Successfully imported {added_count} recipients."}
+    # Hand the massive list to your Celery worker (from our previous setup!)
+    from celery_tasks.tasks import process_bulk_import
+    process_bulk_import.delay(current_user.id, contacts_data, [])
+    
+    return {
+        "status": "success", 
+        "message": f"Successfully received {len(contacts_data)} emails! They are now being processed in the background."
+    }
+
