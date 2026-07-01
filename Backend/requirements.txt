@@ -84,4 +84,3 @@ wcwidth==0.7.0
 websockets==16.0
 xgboost==3.3.0
 requests==2.34.0
-python-multipart==0.0.9
