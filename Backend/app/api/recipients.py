@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 import csv
 import io
 import re
+from typing import Optional
 
 from app.models.database import SendLog, get_db, Recipient, Group, OpenEvent, ClickEvent, User
 from app.services.auth_services import get_current_user
@@ -127,7 +128,7 @@ def suppress_recipient(recipient_id: str, suppress: bool = False, db: Session = 
 @router.post("/upload-csv")
 async def upload_recipients_csv(
     file: UploadFile = File(...), 
-    group_id: str = Form(None),
+    group_id: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user)
 ):
     # Read the file data into memory
