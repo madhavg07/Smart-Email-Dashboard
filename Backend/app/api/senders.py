@@ -31,6 +31,7 @@ def add_sender_account(req: AddSenderRequest, db: Session = Depends(get_db)):
     # 1. NEW FIX: Look up the real database ID using the email from the token
     # (If your User model uses 'username' instead of 'email', change User.email to User.username below)
     real_user = db.query(User).filter(User.email == req.user_id).first()
+    print(f"DEBUG: Vercel sent user_id: '{req.user_id}' or '{real_user}'")
     
     if not real_user:
         raise HTTPException(status_code=404, detail="User not found in database.")
