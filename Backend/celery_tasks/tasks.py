@@ -58,14 +58,14 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
         db.commit()
 
         delay_trackers = {}
+        unprocessed_recipients = []
 
         for idx, rid in enumerate(recipient_ids):
             sender = get_available_sender(db, campaign.user_id)
 
             if not sender:
-                db.close()
-                self.retry(countdown=86400)
-                return
+                unprocessed_recipients = recipient_ids[idx:]
+                break
 
             if sender.id not in delay_trackers:
                 delay_trackers[sender.id] = 0
@@ -74,13 +74,17 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
             delay_trackers[sender.id] += jitter
 
             sender.sent_today += 1
-            db.commit()
 
             dispatch_email.apply_async(
                 args=[sender.id, rid, campaign_id, personalize, idx, sender_name],
                 countdown=delay_trackers[sender.id]
             )
             
+        db.commit()
+
+        if unprocessed_recipients:
+            self.retry(args=[campaign_id, unprocessed_recipients, personalize, sender_name], countdown=86400)
+
     except Exception as e:
         db.rollback()
         raise self.retry(exc=e, countdown=60)
@@ -179,9 +183,10 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         server.send_message(msg)
         server.quit()
 
-        recipient.total_emails_received += 1
-        campaign.total_sent = (campaign.total_sent or 0) + 1
+        recipient.total_emails_received = Recipient.total_emails_received + 1
+        campaign.total_sent = Campaign.total_sent + 1
         campaign.sent_at = datetime.utcnow()
+        
         if campaign.status == "sending":
             campaign.status = "sent"
 
@@ -280,5 +285,36 @@ def auto_retrain_suppression_model(self):
         
     except Exception as e:
         logger.error(f"Error during model retraining: {str(e)}")
+    finally:
+        db.close()
+
+@celery_app.task(bind=True)
+def process_bulk_import(self, user_id: str, contacts_data: list, group_ids: list = None):
+    from app.models.database import SessionLocal, Recipient
+    
+    db = SessionLocal()
+    try:
+        existing_records = db.query(Recipient.email).filter(Recipient.user_id == user_id).all()
+        existing_emails = {record[0] for record in existing_records}
+
+        new_recipients = []
+        for contact in contacts_data:
+            email = contact.get("email", "").strip().lower()
+            if email and email not in existing_emails:
+                new_recipients.append(
+                    Recipient(
+                        user_id=user_id,
+                        email=email,
+                        name=contact.get("name", ""),
+                        metadata_={"group_ids": group_ids} if group_ids else {}
+                    )
+                )
+
+        if new_recipients:
+            db.bulk_save_objects(new_recipients)
+            db.commit()
+
+    except Exception as e:
+        db.rollback()
     finally:
         db.close()
