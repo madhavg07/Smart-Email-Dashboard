@@ -46,6 +46,7 @@ celery_app.conf.update(
 def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personalize: bool = True, sender_name: str = None):
     from app.models.database import SessionLocal, Campaign
     from app.services.rotation_service import get_available_sender
+    import random
 
     db = SessionLocal()
     try:
@@ -69,7 +70,7 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
             if sender.id not in delay_trackers:
                 delay_trackers[sender.id] = 0
 
-            jitter = random.randint(120, 360)
+            jitter = random.randint(60, 120)
             delay_trackers[sender.id] += jitter
 
             sender.sent_today += 1
@@ -86,27 +87,21 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
     finally:
         db.close()
 
+
 @celery_app.task(bind=True, max_retries=999)
 def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, personalize: bool, idx: int, sender_name: str = None):
-    import pytz
-    from datetime import timedelta
     from app.models.database import SessionLocal, Campaign, Recipient, SendLog, SenderAccount
     from app.services.email_service import inject_tracking_pixel, rewrite_links, build_html_email
     from app.services.ai_service import personalize_email
     from app.services.encryption import decrypt_password
     from email.utils import formataddr
-
-    ist_timezone = pytz.timezone('Asia/Kolkata')
-    now_ist = datetime.now(ist_timezone)
-
-    if now_ist.hour < 9 or now_ist.hour >= 17:
-        if now_ist.hour >= 17:
-            next_9am = (now_ist + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
-        else:
-            next_9am = now_ist.replace(hour=9, minute=0, second=0, microsecond=0)
-
-        seconds_to_wait = (next_9am - now_ist).total_seconds()
-        raise self.retry(countdown=seconds_to_wait)
+    from email.message import EmailMessage
+    import smtplib
+    import ssl
+    import os
+    import uuid
+    from datetime import datetime
+    import asyncio
 
     db = SessionLocal()
     try:
