@@ -92,7 +92,7 @@ def build_html_email(body_html: str, subject: str, recipient_name: str = "") -> 
         color: #333333;
     }}
     .container {{ 
-        max-width: 600px; 
+        max-width: 100%; 
         margin: 0 auto; 
         padding: 30px 20px; 
         line-height: 1.6; 
