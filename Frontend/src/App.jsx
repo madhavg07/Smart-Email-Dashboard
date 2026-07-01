@@ -185,7 +185,7 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
   );
 }
 
-function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
+function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSkip, limit }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [newRecipient, setNewRecipient] = useState({ email: "", name: "", role: "", industry: "", company: "", newGroupName: "" });
@@ -253,7 +253,7 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
         formData.append("group_id", uploadGroupId);
       }
 
-      const authToken = localStorage.getItem("access_token") || localStorage.getItem("token");
+      const authToken = localStorage.getItem("mailpulse_token");
 
       const response = await fetch("https://smart-email-dashboard.onrender.com/api/recipients/upload-csv", {
         method: "POST",
@@ -293,9 +293,6 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
             style={{ display: "none" }} 
           />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>
-              Recipients <span style={{ fontSize: 16, color: "#6b7280", fontWeight: 500 }}>({totalCount} Total)</span>
-            </h1>
             
             <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               {/* THE NEW DROPDOWN */}
@@ -405,6 +402,33 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
             })}
           </tbody>
         </table>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px", background: "#0d1117", borderTop: "1px solid #1f2937" }}>
+          <div style={{ color: "#9ca3af", fontSize: 13 }}>
+            Showing {skip + 1} to {Math.min(skip + limit, totalCount)} of {totalCount}
+          </div>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button 
+              onClick={() => {
+                setSkip(skip - limit);
+                onRefresh(); 
+              }} 
+              disabled={skip === 0}
+              style={{ padding: "8px 16px", borderRadius: 8, background: skip === 0 ? "#1f2937" : "#374151", color: skip === 0 ? "#6b7280" : "#f9fafb", border: "none", cursor: skip === 0 ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13 }}
+            >
+              ← Previous
+            </button>
+            <button 
+              onClick={() => {
+                setSkip(skip + limit);
+                onRefresh();
+              }} 
+              disabled={(skip + limit) >= totalCount}
+              style={{ padding: "8px 16px", borderRadius: 8, background: (skip + limit) >= totalCount ? "#1f2937" : "#3b82f6", color: (skip + limit) >= totalCount ? "#6b7280" : "#fff", border: "none", cursor: (skip + limit) >= totalCount ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13 }}
+            >
+              Next →
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -959,6 +983,9 @@ export default function App() {
   const [smtpForm, setSmtpForm] = useState({ smtp_host: "smtp.gmail.com", smtp_port: 587, smtp_username: "", smtp_password: "" });
   const userId = getUserIdFromToken();
 
+  const [skip, setSkip] = useState(0);
+  const limit = 100;
+
   const formatPercentage = (value) => {
     return `${((value || 0) * 100).toFixed(1)}%`;
   };
@@ -991,7 +1018,7 @@ export default function App() {
       const [ov, cmp, rcp, tl, grp] = await Promise.all([
         api("/analytics/overview").catch(() => ({})),
         api("/campaigns/").catch(() => []),
-        api("/recipients/").catch(() => []),
+        api(`/recipients/?skip=${skip}&limit=${limit}`).catch(() => []),
         api("/analytics/opens-over-time").catch(() => []),
         api("/groups/").catch(() => []),
       ]);
@@ -1001,11 +1028,11 @@ export default function App() {
       setTimeline(Array.isArray(tl) ? tl : (tl?.timeline || []));
       setGroups(Array.isArray(grp) ? grp : []);
     } catch (e) {
-      console.error("Data load issue:", e);
+      console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, skip, limit]); 
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -1064,16 +1091,28 @@ export default function App() {
           </div>
         )}
         {page === "dashboard" && (
-<DashboardPage 
-      overview={overview} 
-      timeline={timeline} 
-      pieData={pieData} 
-      campaigns={campaigns} 
-      pct={formatPercentage}
-    />
-  )}
+          <DashboardPage 
+            overview={overview} 
+            timeline={timeline} 
+            pieData={pieData} 
+            campaigns={campaigns} 
+            pct={formatPercentage}
+          />
+        )}
         {page === "campaigns" && <CampaignsPage campaigns={campaigns} recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
-        {page === "recipients" && <RecipientsPage recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
+        
+        {page === "recipients" && (
+          <RecipientsPage 
+            recipients={recipients} 
+            groups={groups} 
+            onRefresh={loadData} 
+            showToast={showToast} 
+            skip={skip} 
+            setSkip={setSkip} 
+            limit={limit} 
+          />
+        )}
+        
         {page === "groups" && <GroupsPage groups={groups} recipients={recipients} onRefresh={loadData} showToast={showToast} />}
         {page === "compose" && <UnifiedAIFlowPage showToast={showToast} onRefresh={loadData} />}
         {page === "senders" && <SenderAccountManager userId={userId} />}

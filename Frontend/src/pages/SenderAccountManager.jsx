@@ -30,7 +30,7 @@ export default function SenderAccountManager({ showToast }) {
 
   const fetchAccounts = async () => {
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("mailpulse_token");
       const response = await fetch(`${API_BASE}/api/senders`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -49,7 +49,7 @@ export default function SenderAccountManager({ showToast }) {
     e.preventDefault();
     setLoading(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("mailpulse_token");
       const decoded = decodeJWT(token);
       const realUserId = decoded && decoded.sub ? String(decoded.sub) : "unknown";
 
