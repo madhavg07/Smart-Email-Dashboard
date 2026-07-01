@@ -1104,7 +1104,15 @@ export default function App() {
             pct={formatPercentage}
           />
         )}
-        {page === "campaigns" && <CampaignsPage campaigns={campaigns} recipients={recipients} groups={groups} onRefresh={loadData} showToast={showToast} />}
+        {page === "campaigns" && (
+          <CampaignsPage 
+            campaigns={campaigns} 
+            recipients={Array.isArray(recipients) ? recipients : (recipients?.data || [])} 
+            groups={groups} 
+            onRefresh={loadData} 
+            showToast={showToast} 
+          />
+        )}
         
         {page === "recipients" && (
           <RecipientsPage 
@@ -1118,7 +1126,14 @@ export default function App() {
           />
         )}
         
-        {page === "groups" && <GroupsPage groups={groups} recipients={recipients} onRefresh={loadData} showToast={showToast} />}
+        {page === "groups" && (
+          <GroupsPage 
+            groups={groups} 
+            recipients={Array.isArray(recipients) ? recipients : (recipients?.data || [])} 
+            onRefresh={loadData} 
+            showToast={showToast} 
+          />
+        )}
         {page === "compose" && <UnifiedAIFlowPage showToast={showToast} onRefresh={loadData} />}
         {page === "senders" && <SenderAccountManager userId={userId} />}
         {showSettings && (
