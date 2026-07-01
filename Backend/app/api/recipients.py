@@ -47,7 +47,7 @@ def list_recipients(
         "data": recipients
     }
 
-@router.post("/")
+@router.post("/add")
 def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     
     # 1. PARSE THE PASTED TEXT
