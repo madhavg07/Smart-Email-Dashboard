@@ -237,6 +237,8 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
     finally { setSaving(false); }
   };
 
+  const [uploadGroupId, setUploadGroupId] = useState("");
+
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -245,17 +247,30 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      
+      // Attach the selected group ID to the form data (if they chose one!)
+      if (uploadGroupId) {
+        formData.append("group_id", uploadGroupId);
+      }
+
+      const authToken = localStorage.getItem("access_token") || localStorage.getItem("token");
 
       const response = await fetch("https://smart-email-dashboard.onrender.com/api/recipients/upload-csv", {
         method: "POST",
+        headers: { "Authorization": `Bearer ${authToken}` },
         body: formData
       });
       
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Unauthorized or Server Error");
+      }
+
       const data = await response.json();
       showToast(data.message || "CSV Uploaded", "success");
       onRefresh();
     } catch (e) {
-      showToast("Failed to upload CSV", "error");
+      showToast(e.message || "Failed to upload CSV", "error");
     } finally {
       setSaving(false);
       event.target.value = null;
@@ -277,12 +292,39 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast }) {
             onChange={handleFileUpload} 
             style={{ display: "none" }} 
           />
-          <button 
-            onClick={() => fileInputRef.current.click()} 
-            disabled={saving}
-            style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}>
-            {saving ? "Uploading..." : "Upload CSV"}
-          </button>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>
+              Recipients <span style={{ fontSize: 16, color: "#6b7280", fontWeight: 500 }}>({totalCount} Total)</span>
+            </h1>
+            
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              {/* THE NEW DROPDOWN */}
+              <select 
+                value={uploadGroupId} 
+                onChange={(e) => setUploadGroupId(e.target.value)}
+                style={{ padding: "10px", borderRadius: 8, background: "#0d1117", border: "1px solid #374151", color: "#f9fafb", fontSize: 13, outline: "none" }}
+              >
+                <option value="">No Group (Default)</option>
+                {groups.map(g => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+
+              <input 
+                type="file" 
+                accept=".csv" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload} 
+                style={{ display: "none" }} 
+              />
+              <button 
+                onClick={() => fileInputRef.current.click()} 
+                disabled={saving}
+                style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}>
+                {saving ? "Uploading..." : "Upload CSV"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

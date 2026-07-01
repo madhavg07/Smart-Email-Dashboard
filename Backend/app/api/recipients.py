@@ -2,7 +2,7 @@
 
 Provides listing and creation of recipients using the project's SQLAlchemy models.
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Form
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 import csv
@@ -127,6 +127,7 @@ def suppress_recipient(recipient_id: str, suppress: bool = False, db: Session = 
 @router.post("/upload-csv")
 async def upload_recipients_csv(
     file: UploadFile = File(...), 
+    group_id: str = Form(None),
     current_user: User = Depends(get_current_user)
 ):
     # Read the file data into memory
@@ -147,9 +148,10 @@ async def upload_recipients_csv(
                 "name": row[1].strip() if len(row) > 1 else ""
             })
             
-    # Hand the massive list to your Celery worker (from our previous setup!)
+    group_ids_list = [group_id] if group_id else []
+                
     from celery_tasks.tasks import process_bulk_import
-    process_bulk_import.delay(current_user.id, contacts_data, [])
+    process_bulk_import.delay(current_user.id, contacts_data, group_ids_list)
     
     return {
         "status": "success", 
