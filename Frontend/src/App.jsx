@@ -1022,17 +1022,22 @@ export default function App() {
         api("/analytics/opens-over-time").catch(() => []),
         api("/groups/").catch(() => []),
       ]);
+      
       setOverview(ov || {});
       setCampaigns(Array.isArray(cmp) ? cmp : (cmp?.campaigns || []));
-      setRecipients(Array.isArray(rcp) ? rcp : (rcp?.recipients || []));
+      
+      // 🚀 THE FIX: Pass the whole object (or a safe fallback) so your pagination 
+      // keeps both the .data array and the .total count!
+      setRecipients(rcp || { data: [], total: 0 });
+      
       setTimeline(Array.isArray(tl) ? tl : (tl?.timeline || []));
-      setGroups(Array.isArray(grp) ? grp : []);
+      setGroups(Array.isArray(grp) ? grp : (grp?.data || grp?.groups || []));
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, skip, limit]); 
+  }, [isAuthenticated, skip, limit]);
 
   useEffect(() => {
     if (isAuthenticated) {
