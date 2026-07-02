@@ -11,7 +11,7 @@ import smtplib
 import random
 from email.message import EmailMessage
 from celery import Celery
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from celery.schedules import crontab
 
@@ -83,7 +83,32 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
         db.commit()
 
         if unprocessed_recipients:
-            self.retry(args=[campaign_id, unprocessed_recipients, personalize, sender_name], countdown=86400)
+            # 1. Get the current time and the campaign's original start time
+            now = datetime.utcnow()
+            original_start = campaign.created_at # Grabs the exact time you clicked "Send" on day 1
+            
+            # 2. Calculate tomorrow's date
+            tomorrow = now + timedelta(days=1)
+            
+            # 3. Set the target wake-up to tomorrow at the EXACT hour/minute the campaign started
+            target_wakeup = tomorrow.replace(
+                hour=original_start.hour, 
+                minute=original_start.minute, 
+                second=0, 
+                microsecond=0
+            )
+            
+            # 4. Figure out seconds until that time
+            seconds_until_wakeup = int((target_wakeup - now).total_seconds())
+            
+            # 5. Add a tiny bit of randomness (0 to 30 mins) so it isn't robotic
+            randomized_wakeup = seconds_until_wakeup + random.randint(0, 1800)
+
+            # 6. Put it to sleep!
+            self.retry(
+                args=[campaign_id, unprocessed_recipients, personalize, sender_name], 
+                countdown=randomized_wakeup
+            )
 
     except Exception as e:
         db.rollback()
