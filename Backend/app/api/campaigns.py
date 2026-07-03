@@ -108,11 +108,15 @@ async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(g
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    logs = db.query(SendLog).filter(SendLog.campaign_id == campaign_id).all()
+    results = (
+        db.query(SendLog, Recipient)
+        .outerjoin(Recipient, SendLog.recipient_id == Recipient.id)
+        .filter(SendLog.campaign_id == campaign_id)
+        .all()
+    )
     
     report = []
-    for log in logs:
-        recipient = db.query(Recipient).filter(Recipient.id == log.recipient_id).first()
+    for log, recipient in results:
         report.append({
             "email": recipient.email if recipient else "Unknown",
             "name": recipient.name if recipient else "Unknown",
