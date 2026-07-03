@@ -145,6 +145,7 @@ class SendLog(Base):
     open_count = Column(Integer, default=0)
     click_count = Column(Integer, default=0)
     recipient = relationship("Recipient")
+    status = Column(String, default="queued")
 
 
 class OpenEvent(Base):
