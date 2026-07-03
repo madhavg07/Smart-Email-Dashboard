@@ -588,7 +588,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
             
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #374151", paddingTop: 16, marginBottom: 8 }}>
               <div style={{ color: "#9ca3af", fontWeight: "bold" }}>Email Content:</div>
-              {viewCampaign.status !== "sent" && viewCampaign.status !== "sending" && (
+              {!['sending', 'sent', 'paused', 'completed'].includes(viewCampaign.status) && (
                 !isEditing ? (
                   <button onClick={() => setIsEditing(true)} style={{ background: "#3b82f6", color: "#fff", border: "none", padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: "bold" }}>✏️ Edit Content</button>
                 ) : (
@@ -704,7 +704,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => { setViewCampaign(c); setIsEditing(false); setEditedContent(c.body_html); }} style={{ background: "transparent", color: "#60a5fa", border: "1px solid #1e3a8a", borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontWeight: "bold" }}>🔍 Details</button>
-              {c.status === "sent" || c.status === "sending" ? (
+              {['sending', 'sent', 'paused', 'completed'].includes(c.status) ? (
                 <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>📊 Report</button>
               ) : (
                 <button onClick={() => { setSelRecs([]); setSelGroups([]); setSendModal(c.id); }} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>Send Now ▶</button>
