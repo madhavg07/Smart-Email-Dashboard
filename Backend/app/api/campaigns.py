@@ -111,7 +111,7 @@ async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(g
     results = (
         db.query(SendLog, Recipient)
         .outerjoin(Recipient, SendLog.recipient_id == Recipient.id)
-        .filter(SendLog.campaign_id == campaign_id)
+        .filter(SendLog.campaign_id == campaign_id, SendLog.sent_at.isnot(None))
         .all()
     )
     
