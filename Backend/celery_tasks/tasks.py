@@ -30,8 +30,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    broker_use_ssl={'ssl_cert_reqs': ssl.CERT_NONE},
-    redis_backend_use_ssl={'ssl_cert_reqs': ssl.CERT_NONE},
+    # broker_use_ssl={'ssl_cert_reqs': ssl.CERT_NONE},
+    # redis_backend_use_ssl={'ssl_cert_reqs': ssl.CERT_NONE},
     broker_connection_retry_on_startup=True,
     redis_socket_keepalive=True,
     broker_pool_limit=None,
@@ -214,6 +214,9 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         
         if campaign.status == "sending":
             campaign.status = "sent"
+        
+        send_log.status = 'sent'
+        send_log.sent_at = datetime.utcnow()
 
         db.commit()
 
