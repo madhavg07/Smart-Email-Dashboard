@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
 
-import { api, getToken, setToken, clearToken } from './api';
+import { api, API_URL, getToken, setToken, clearToken } from './api';
 import AuthPage from './pages/AuthPage';
 import SenderAccountManager from './pages/SenderAccountManager';
 
@@ -451,6 +451,8 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const [selRecs, setSelRecs] = useState([]);
   const [selGroups, setSelGroups] = useState([]);
   const [sending, setSending] = useState(false);
+  const [sendProgress, setSendProgress] = useState(null);
+  const pollRef = useRef(null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
@@ -488,21 +490,64 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     } catch (e) { showToast(e.message, "error"); }
   };
 
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  // Clean up the polling timer if the component unmounts mid-send.
+  useEffect(() => stopPolling, []);
+
+  const fetchProgress = async (campaignId) => {
+    try {
+      const s = await api(`/campaigns/${campaignId}/queue-status`);
+      setSendProgress(s);
+      // Done when nothing is left pending or actively sending.
+      if (s.total === 0 || (s.pending + s.sending) === 0) {
+        stopPolling();
+        setSending(false);
+        onRefresh();
+      }
+    } catch (e) {
+      // Ignore transient errors while polling; keep the last known progress.
+    }
+  };
+
+  const closeSendModal = () => {
+    stopPolling();
+    setSendModal(null);
+    setSendProgress(null);
+    setSending(false);
+    setSendSenderName("");
+    setUseAIPersonalization(false);
+    setSelRecs([]);
+    setSelGroups([]);
+  };
+
   const executeSend = async () => {
     if (sending) return;
     setSending(true);
     try {
-      await api(`/campaigns/${sendModal}/send`, { 
-        method: "POST", 
-        body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: useAIPersonalization, sender_name: sendSenderName }) 
+      const res = await api(`/campaigns/${sendModal}/send`, {
+        method: "POST",
+        body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: useAIPersonalization, sender_name: sendSenderName })
       });
-      showToast("Campaign queued for sending!");
-      setSendModal(null);
-      setSendSenderName("");
-      if (typeof setUseAIPersonalization === 'function') setUseAIPersonalization(false);
-      onRefresh();
-    } catch (e) { showToast(e.message, "error"); }
-    setSending(false);
+      showToast(`Queued ${res.queued ?? 0} recipient(s) for sending`);
+      // Switch the modal into live-progress mode, then poll queue-status.
+      setSendProgress({
+        total: (res.queued ?? 0) + (res.already_queued ?? 0),
+        pending: res.queued ?? 0,
+        sending: 0, sent: 0, failed: 0, skipped: 0,
+        percent_complete: 0,
+      });
+      fetchProgress(sendModal);
+      pollRef.current = setInterval(() => fetchProgress(sendModal), 2000);
+    } catch (e) {
+      showToast(e.message, "error");
+      setSending(false);
+    }
   };
 
   const createCampaign = async () => {
@@ -515,7 +560,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
         subject_b: isABTest ? subjectB : null,
         body_html_b: isABTest ? bodyHtmlB : null
       };
-      await api("/campaigns", { method: "POST", body: JSON.stringify(payload) });
+      await api("/campaigns/", { method: "POST", body: JSON.stringify(payload) });
       showToast("Campaign created successfully");
       setNewCampModal(false);
       setNewCampName(""); setNewCampSubject(""); setNewCampBody("");
@@ -638,7 +683,52 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
       )}
 
       {sendModal && (
-        <ModalOverlay title="Target Audience Selection" onClose={() => setSendModal(null)}>
+        <ModalOverlay title={sendProgress ? "Sending Progress" : "Target Audience Selection"} onClose={closeSendModal}>
+          {sendProgress ? (
+            (() => {
+              const done = sendProgress.total === 0 || (sendProgress.pending + sendProgress.sending) === 0;
+              const pctVal = sendProgress.total > 0 ? sendProgress.percent_complete : (done ? 100 : 0);
+              return (
+                <div>
+                  {sendProgress.total === 0 ? (
+                    <div style={{ color: "#9ca3af", textAlign: "center", padding: "20px 0" }}>
+                      Nothing new to send — all selected recipients were already queued or processed.
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                        <span style={{ color: "#d1d5db", fontSize: 14, fontWeight: 600 }}>{done ? "✅ Completed" : "📤 Sending…"}</span>
+                        <span style={{ color: "#f9fafb", fontSize: 20, fontWeight: 700, fontFamily: "'Space Grotesk', monospace" }}>{fmt(pctVal)}%</span>
+                      </div>
+                      <div style={{ height: 12, background: "#0d1117", borderRadius: 999, overflow: "hidden", border: "1px solid #1f2937" }}>
+                        <div style={{ width: `${Math.min(100, pctVal)}%`, height: "100%", background: done ? "#22c55e" : "#3b82f6", transition: "width 0.4s ease" }} />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 16 }}>
+                        {[
+                          { label: "Sent", value: sendProgress.sent, color: "#4ade80" },
+                          { label: "Pending", value: sendProgress.pending + sendProgress.sending, color: "#facc15" },
+                          { label: "Failed", value: sendProgress.failed, color: "#f87171" },
+                          { label: "Skipped", value: sendProgress.skipped, color: "#9ca3af" },
+                        ].map(stat => (
+                          <div key={stat.label} style={{ background: "#0d1117", border: "1px solid #1f2937", borderRadius: 8, padding: "10px 12px", textAlign: "center" }}>
+                            <div style={{ color: stat.color, fontSize: 20, fontWeight: 700 }}>{stat.value}</div>
+                            <div style={{ color: "#6b7280", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>{stat.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ color: "#6b7280", fontSize: 12, textAlign: "center", marginTop: 12 }}>
+                        {sendProgress.sent + sendProgress.failed + sendProgress.skipped} of {sendProgress.total} processed
+                      </div>
+                    </>
+                  )}
+                  <button onClick={closeSendModal} style={{ marginTop: 20, width: "100%", background: done ? "#22c55e" : "#374151", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
+                    {done ? "Done" : "Run in Background"}
+                  </button>
+                </div>
+              );
+            })()
+          ) : (
+          <>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
             <div>
               <h4 style={{ color: "#d1d5db", marginTop: 0 }}>Select Groups</h4>
@@ -684,6 +774,8 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
           <button onClick={executeSend} disabled={sending} style={{ marginTop: 20, width: "100%", background: "#22c55e", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
             {sending ? "Processing..." : "Confirm & Send Campaign"}
           </button>
+          </>
+          )}
         </ModalOverlay>
       )}
 
@@ -707,7 +799,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
               {['sending', 'sent', 'paused', 'completed'].includes(c.status) ? (
                 <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>📊 Report</button>
               ) : (
-                <button onClick={() => { setSelRecs([]); setSelGroups([]); setSendModal(c.id); }} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>Send Now ▶</button>
+                <button onClick={() => { setSelRecs([]); setSelGroups([]); setSendProgress(null); setSendModal(c.id); }} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>Send Now ▶</button>
               )}
               <button onClick={() => deleteCampaign(c.id)} style={{ background: "transparent", color: "#f87171", border: "1px solid #7f1d1d", borderRadius: 8, padding: "8px 12px", cursor: "pointer" }}>🗑️</button>
             </div>
@@ -732,23 +824,36 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
   const [aiScore, setAiScore] = useState(null);
   const [isScoring, setIsScoring] = useState(false);
 
-  // NEW: Function to ping the Hugging Face API
+  // Pings the Hugging Face subject scorer. NOTE: this endpoint is mounted at the
+  // API root (POST /analyze-subject, no /api prefix), so we bypass the api()
+  // wrapper (which always prepends /api) and call the root origin directly.
   const analyzeSubjectLine = async (text) => {
     if (!text) {
       setAiScore(null);
       return;
     }
-    
+
     setIsScoring(true);
     try {
-      // Using your existing api() wrapper to automatically handle tokens/URLs
-      const res = await api("/ai/score-subject", { 
-        method: "POST", 
-        body: JSON.stringify({ subject_line: text }) 
+      const ROOT_URL = API_URL.replace(/\/api\/?$/, "");
+      const response = await fetch(`${ROOT_URL}/analyze-subject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: text }),
       });
-      setAiScore(res);
-    } catch (e) { 
-      console.error("Failed to score subject line:", e); 
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      // Backend returns { subject, score (1-10 float), feedback }.
+      // Derive is_optimal for the UI (backend calls >7 "great").
+      const res = await response.json();
+      setAiScore({
+        score: res.score,
+        is_optimal: (res.score ?? 0) >= 7,
+        feedback: res.feedback,
+      });
+    } catch (e) {
+      console.error("Failed to score subject line:", e);
+      setAiScore(null);
     } finally {
       setIsScoring(false);
     }
@@ -800,7 +905,7 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
         body_html_b: (includeABTest && selectedVariant) ? selectedVariant.body : null
       };
 
-      await api("/campaigns", { method: "POST", body: JSON.stringify(payload) });
+      await api("/campaigns/", { method: "POST", body: JSON.stringify(payload) });
       
       showToast("Saved to Drafts successfully!");
       onRefresh();
@@ -861,7 +966,7 @@ function UnifiedAIFlowPage({ showToast, onRefresh }) {
                 background: aiScore.is_optimal ? "#166534" : "#991b1b",
                 color: "#fff" 
               }}>
-                {aiScore.is_optimal ? "🔥 Great Subject" : "⚠️ Low Engagement"} ({aiScore.score}%)
+                {aiScore.is_optimal ? "🔥 Great Subject" : "⚠️ Low Engagement"} ({aiScore.score}/10)
               </span>
             ) : null}
           </div>

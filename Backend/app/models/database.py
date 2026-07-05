@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, JSON
+from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, JSON, UniqueConstraint, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -72,10 +72,13 @@ class SenderAccount(Base):
     credentials = Column(String) # Encrypted password or API key
     
     # Rotation & Limit Management
-    daily_limit = Column(Integer, default=400) # Keep under 500 for Gmail
+    daily_limit = Column(Integer, default=400) # Ceiling. Effective limit is min(warmup_schedule(age), daily_limit)
     sent_today = Column(Integer, default=0)
     last_reset = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
+    # Warmup: brand-new Gmail accounts start at 30/day and ramp up based on age.
+    # For already-warmed existing accounts, the migration backdates this ~60 days.
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class Campaign(Base):
     __tablename__ = "campaigns"
@@ -170,4 +173,50 @@ class ClickEvent(Base):
     ip_address = Column(String, nullable=True)
     user_agent = Column(String, nullable=True)
     clicked_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SendQueue(Base):
+    """
+    Durable outbox / send queue. This is the SINGLE SOURCE OF TRUTH for which
+    emails still need to go out. Every recipient of a campaign gets one row here
+    the moment the campaign is sent. The background worker pulls 'pending' rows,
+    sends them, and flips them to 'sent'. If Redis, the worker, or the VM dies,
+    nothing is lost because every pending recipient is safe in Postgres (Neon).
+
+    Statuses:
+      pending  -> waiting to be sent (also where overflow waits for daily reset)
+      sending  -> locked by a worker right now (crash-recovered after a timeout)
+      sent     -> delivered; a SendLog row exists
+      failed   -> exceeded max attempts; needs manual attention
+      skipped  -> recipient suppressed / no longer valid
+    """
+    __tablename__ = "send_queue"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    campaign_id = Column(String, ForeignKey("campaigns.id"), nullable=False, index=True)
+    recipient_id = Column(String, ForeignKey("recipients.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+
+    status = Column(String, default="pending", index=True)
+    variant = Column(String, default="A")            # A/B handled at enqueue time
+    personalize = Column(Boolean, default=True)
+    sender_name = Column(String, nullable=True)
+
+    scheduled_for = Column(DateTime, default=datetime.utcnow, index=True)
+    attempts = Column(Integer, default=0)
+    max_attempts = Column(Integer, default=5)
+    last_error = Column(Text, nullable=True)
+
+    locked_at = Column(DateTime, nullable=True)      # set when status='sending' for crash recovery
+    sender_id = Column(Integer, nullable=True)       # which sender account delivered it
+    send_log_id = Column(String, nullable=True)      # link to the resulting SendLog
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Belt-and-suspenders against duplicate sends: one row per (campaign, recipient).
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "recipient_id", name="uq_sendqueue_campaign_recipient"),
+        Index("ix_sendqueue_status_scheduled", "status", "scheduled_for"),
+    )
     

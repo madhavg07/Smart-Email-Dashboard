@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent, User
+from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent, User, SendQueue
 from typing import List, Optional
+from datetime import datetime
 from app.services.auth_services import get_current_user # THE BOUNCER
 
 router = APIRouter()
@@ -93,13 +94,72 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
 
     target_ids = list(final_recipient_ids)
 
+    # --- Durable enqueue into the Postgres send_queue (source of truth) --------
+    # Every recipient gets a persistent row. If Redis/the worker/the VM dies,
+    # nothing is lost -- the worker resumes straight from these rows. We skip any
+    # recipient already queued for this campaign so re-sends can't duplicate.
     try:
-        from celery_tasks.tasks import process_campaign_queue
-        process_campaign_queue.delay(campaign_id, target_ids, personalize, sender_name)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to queue send task: {e}")
+        already = {
+            r[0] for r in db.query(SendQueue.recipient_id)
+            .filter(SendQueue.campaign_id == campaign_id).all()
+        }
+        now = datetime.utcnow()
+        new_rows = []
+        for idx, rid in enumerate(target_ids):
+            if rid in already:
+                continue
+            # Decide A/B variant deterministically at enqueue time.
+            variant = "B" if (campaign.is_ab_test and idx % 2 != 0) else "A"
+            new_rows.append(SendQueue(
+                campaign_id=campaign_id,
+                recipient_id=rid,
+                user_id=current_user.id,
+                status="pending",
+                variant=variant,
+                personalize=personalize,
+                sender_name=sender_name,
+                scheduled_for=now,
+            ))
 
-    return {"status": "queued", "campaign_id": campaign_id, "queued": len(target_ids)}
+        if new_rows:
+            db.bulk_save_objects(new_rows)
+        campaign.status = "sending"
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue campaign: {e}")
+
+    return {
+        "status": "queued",
+        "campaign_id": campaign_id,
+        "queued": len(new_rows),
+        "already_queued": len(target_ids) - len(new_rows),
+    }
+
+
+@router.get("/{campaign_id}/queue-status")
+async def campaign_queue_status(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Live progress of a campaign's send queue, for the dashboard progress bar."""
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    counts = dict(
+        db.query(SendQueue.status, func.count(SendQueue.id))
+        .filter(SendQueue.campaign_id == campaign_id)
+        .group_by(SendQueue.status).all()
+    )
+    total = sum(counts.values())
+    return {
+        "campaign_id": campaign_id,
+        "total": total,
+        "pending": counts.get("pending", 0),
+        "sending": counts.get("sending", 0),
+        "sent": counts.get("sent", 0),
+        "failed": counts.get("failed", 0),
+        "skipped": counts.get("skipped", 0),
+        "percent_complete": round((counts.get("sent", 0) / total * 100), 1) if total else 0.0,
+    }
 
 @router.get("/{campaign_id}/report")
 async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

@@ -244,7 +244,7 @@ def auto_suppress_inactive_students(self):
                 
                 # Calculate Engagement Score (Opens are worth 1 point, Clicks are worth 2)
                 # You can make this ML-based later, but this heuristic works perfectly for V1
-                engagement_score = (student.opens * 1) + (student.clicks * 2)
+                engagement_score = (student.total_opens * 1) + (student.total_clicks * 2)
                 
                 # If they have received 3+ emails and their score is still 0...
                 if engagement_score == 0:
@@ -264,12 +264,12 @@ def auto_suppress_inactive_students(self):
 celery_app.conf.beat_schedule = {
     # Task 1: Runs every single night at midnight IST to suppress users
     'run-suppression-every-midnight': {
-        'task': 'app.celery_tasks.tasks.auto_suppress_inactive_students',
+        'task': 'celery_tasks.tasks.auto_suppress_inactive_students',
         'schedule': crontab(hour=18, minute=30), 
     },
     # Task 2: Runs every Sunday at midnight UTC to keep the ML model fresh
     'weekly-model-retraining': {
-        'task': 'app.celery_tasks.tasks.auto_retrain_suppression_model',
+        'task': 'celery_tasks.tasks.auto_retrain_suppression_model',
         'schedule': crontab(hour=0, minute=0, day_of_week='sunday'),
     },
 }
@@ -295,8 +295,8 @@ def auto_retrain_suppression_model(self):
         for r in recipients:
             data.append({
                 'total_received': r.total_emails_received,
-                'opens': r.opens,
-                'clicks': r.clicks,
+                'opens': r.total_opens,
+                'clicks': r.total_clicks,
                 'is_suppressed': r.is_suppressed
             })
             
