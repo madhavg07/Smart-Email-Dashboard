@@ -260,6 +260,24 @@ def auto_suppress_inactive_students(self):
     finally:
         db.close()
 
+
+# 1b. Automatic anti-spam content rewrite (runs on the beat schedule below).
+#     Shared logic lives in app/services/auto_optimizer.py (also used by worker.py).
+@celery_app.task(bind=True)
+def auto_optimize_campaigns_task(self):
+    from app.models.database import SessionLocal
+    from app.services.auto_optimizer import optimize_low_engagement_campaigns
+
+    db = SessionLocal()
+    try:
+        n = optimize_low_engagement_campaigns(db)
+        logger.info("auto_optimize_campaigns_task: optimized %s campaign(s)", n)
+    except Exception as e:
+        db.rollback()
+        logger.error("auto_optimize_campaigns_task failed: %s", e)
+    finally:
+        db.close()
+
 # 2. The Alarm Clock (Celery Beat Schedule)
 celery_app.conf.beat_schedule = {
     # Task 1: Runs every single night at midnight IST to suppress users
@@ -271,6 +289,11 @@ celery_app.conf.beat_schedule = {
     'weekly-model-retraining': {
         'task': 'celery_tasks.tasks.auto_retrain_suppression_model',
         'schedule': crontab(hour=0, minute=0, day_of_week='sunday'),
+    },
+    # Task 3: Every 6 hours — auto-rewrite low-engagement campaigns (anti-spam).
+    'auto-optimize-low-engagement': {
+        'task': 'celery_tasks.tasks.auto_optimize_campaigns_task',
+        'schedule': crontab(minute=0, hour='*/6'),
     },
 }
 
@@ -319,30 +342,60 @@ def auto_retrain_suppression_model(self):
 @celery_app.task(bind=True)
 def process_bulk_import(self, user_id: str, contacts_data: list, group_ids: list = None):
     from app.models.database import SessionLocal, Recipient
-    
+    from app.services.email_verifier import verify_bulk
+
     db = SessionLocal()
     try:
+        # 1) VERIFY FIRST. Check every address (syntax + MX + SMTP mailbox probe)
+        #    before adding anyone. Only addresses that come back definitively
+        #    'invalid' are dropped; 'valid' and 'unknown' are kept so we never
+        #    delete real users whose mail servers refuse verification.
+        all_emails = [c.get("email", "") for c in contacts_data]
+        verdicts = {}
+        try:
+            for r in verify_bulk(all_emails):
+                verdicts[(r.get("email") or "").strip().lower()] = r.get("status")
+        except Exception as e:
+            # If verification itself blows up, fail open (import everything)
+            # rather than silently importing nothing.
+            logger.error("Email verification failed, importing without it: %s", e)
+            verdicts = {}
+
         existing_records = db.query(Recipient.email).filter(Recipient.user_id == user_id).all()
         existing_emails = {record[0] for record in existing_records}
 
         new_recipients = []
+        dropped_invalid = 0
         for contact in contacts_data:
             email = contact.get("email", "").strip().lower()
-            if email and email not in existing_emails:
-                new_recipients.append(
-                    Recipient(
-                        user_id=user_id,
-                        email=email,
-                        name=contact.get("name", ""),
-                        metadata_={"group_ids": group_ids} if group_ids else {}
-                    )
+            if not email:
+                continue
+            if verdicts.get(email) == "invalid":
+                dropped_invalid += 1
+                continue
+            if email in existing_emails:
+                continue
+            existing_emails.add(email)  # also de-dupe within the file itself
+            new_recipients.append(
+                Recipient(
+                    user_id=user_id,
+                    email=email,
+                    name=contact.get("name", ""),
+                    metadata_={"group_ids": group_ids} if group_ids else {}
                 )
+            )
 
         if new_recipients:
             db.bulk_save_objects(new_recipients)
             db.commit()
 
+        logger.info(
+            "Bulk import for user %s: added=%s, dropped_invalid=%s, total=%s",
+            user_id, len(new_recipients), dropped_invalid, len(contacts_data)
+        )
+
     except Exception as e:
         db.rollback()
+        logger.error("Bulk import failed: %s", e)
     finally:
         db.close()

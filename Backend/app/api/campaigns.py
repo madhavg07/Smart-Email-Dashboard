@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent, User, SendQueue
+from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent, ClickEvent, User, SendQueue, CampaignContentRevision
 from typing import List, Optional
 from datetime import datetime
 from app.services.auth_services import get_current_user # THE BOUNCER
@@ -162,7 +162,13 @@ async def campaign_queue_status(campaign_id: str, db: Session = Depends(get_db),
     }
 
 @router.get("/{campaign_id}/report")
-async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def get_campaign_tracking_report(campaign_id: str, response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Tracking numbers change constantly as the queue drains and opens/clicks
+    # arrive. Never let a browser/CDN serve a stale cached copy of this report.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+
     # SECURITY: Check ownership
     campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
     if not campaign:
@@ -187,6 +193,38 @@ async def get_campaign_tracking_report(campaign_id: str, db: Session = Depends(g
         })
         
     return {"logs": report}
+
+@router.get("/{campaign_id}/revisions")
+async def get_campaign_revisions(campaign_id: str, response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Content version history: the current live content plus any snapshots
+    (original + auto_ai) created by the automatic anti-spam rewrite."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    revs = (
+        db.query(CampaignContentRevision)
+        .filter(CampaignContentRevision.campaign_id == campaign_id)
+        .order_by(CampaignContentRevision.created_at.asc())
+        .all()
+    )
+    return {
+        "current": {"subject": campaign.subject, "body_html": campaign.body_html},
+        "revisions": [
+            {
+                "id": r.id,
+                "subject": r.subject,
+                "body_html": r.body_html,
+                "source": r.source,
+                "reason": r.reason,
+                "avg_engagement": r.avg_engagement,
+                "created_at": r.created_at,
+            }
+            for r in revs
+        ],
+    }
+
 
 @router.delete("/{campaign_id}")
 async def delete_campaign(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

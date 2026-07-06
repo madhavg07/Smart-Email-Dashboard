@@ -219,4 +219,31 @@ class SendQueue(Base):
         UniqueConstraint("campaign_id", "recipient_id", name="uq_sendqueue_campaign_recipient"),
         Index("ix_sendqueue_status_scheduled", "status", "scheduled_for"),
     )
-    
+
+
+class CampaignContentRevision(Base):
+    """
+    Version history of a campaign's email content.
+
+    A 'auto_ai' revision is created automatically by the worker when a campaign's
+    average recipient engagement stays below the spam-threshold ~2 days after
+    sending: the OLD content is snapshotted here first, then the campaign body is
+    rewritten and the new content is snapshotted too. The campaign detail view
+    shows this whole history alongside the current live content.
+
+    source:
+      original  -> the content as it was before the first auto-optimization
+      auto_ai   -> AI-rewritten because engagement was low (assumed spam-foldered)
+      manual    -> a user edit (optional; reserved for future use)
+    """
+    __tablename__ = "campaign_content_revisions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    campaign_id = Column(String, ForeignKey("campaigns.id"), nullable=False, index=True)
+
+    subject = Column(String, nullable=True)
+    body_html = Column(Text, nullable=True)
+    source = Column(String, default="auto_ai")       # original | auto_ai | manual
+    reason = Column(String, nullable=True)           # human-readable why
+    avg_engagement = Column(Float, nullable=True)     # avg seriousness_score at change time
+    created_at = Column(DateTime, default=datetime.utcnow)

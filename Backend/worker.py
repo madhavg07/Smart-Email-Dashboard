@@ -39,8 +39,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from sqlalchemy import func
+
 from app.models.database import (
     SessionLocal, SendQueue, Campaign, Recipient, SenderAccount, SendLog,
+    CampaignContentRevision,
 )
 from app.services.warmup import get_available_sender, effective_daily_limit
 from app.services.email_service import (
@@ -69,6 +72,15 @@ IDLE_SLEEP_SECONDS = int(os.getenv("WORKER_IDLE_SLEEP", "300"))  # nothing to do
 STUCK_MINUTES = int(os.getenv("WORKER_STUCK_MINUTES", "15"))     # recover rows stuck in 'sending'
 RETRY_BACKOFF_MINUTES = int(os.getenv("WORKER_RETRY_BACKOFF", "10"))
 MAINTENANCE_HOUR = int(os.getenv("WORKER_MAINTENANCE_HOUR", "2"))  # daily suppression sweep (UTC)
+
+# --- Automatic anti-spam content rewrite (feature) -------------------------
+# ~2 days after a campaign starts sending, if the average recipient engagement
+# score stays below the threshold (assumed spam-foldered), the worker rewrites
+# the email body via AI. The remaining queued rows then send the improved body.
+AUTO_OPT_DELAY_DAYS = float(os.getenv("AUTO_OPT_DELAY_DAYS", "2"))
+AUTO_OPT_THRESHOLD = float(os.getenv("AUTO_OPT_THRESHOLD", "0.30"))
+AUTO_OPT_MIN_SENT = int(os.getenv("AUTO_OPT_MIN_SENT", "20"))      # need signal before judging
+AUTO_OPT_CHECK_SECONDS = int(os.getenv("AUTO_OPT_CHECK_SECONDS", "3600"))  # how often to scan
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
@@ -300,6 +312,25 @@ def daily_maintenance(db):
         logger.warning("Daily maintenance skipped due to error: %s", e)
 
 
+_last_optimize_check = None
+
+
+def auto_optimize_low_engagement_campaigns(db):
+    """Throttled wrapper around the shared optimizer (app/services/auto_optimizer.py).
+    The same logic also runs as a Celery beat task; both are idempotent."""
+    global _last_optimize_check
+    now = datetime.utcnow()
+    if _last_optimize_check and (now - _last_optimize_check).total_seconds() < AUTO_OPT_CHECK_SECONDS:
+        return
+    _last_optimize_check = now
+    try:
+        from app.services.auto_optimizer import optimize_low_engagement_campaigns
+        optimize_low_engagement_campaigns(db)
+    except Exception as e:
+        db.rollback()
+        logger.warning("Auto-optimize sweep skipped due to error: %s", e)
+
+
 def main():
     logger.info("MailPulse worker starting. batch=%s gap=%s-%ss idle=%ss",
                 BATCH_SIZE, MIN_GAP_SECONDS, MAX_GAP_SECONDS, IDLE_SLEEP_SECONDS)
@@ -309,6 +340,7 @@ def main():
             db = SessionLocal()
             recover_stuck_rows(db)
             daily_maintenance(db)
+            auto_optimize_low_engagement_campaigns(db)
             sent = process_batch(db)
         except Exception as e:
             logger.exception("Top-level loop error (continuing): %s", e)

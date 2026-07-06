@@ -155,7 +155,7 @@ async def upload_recipients_csv(
     process_bulk_import.delay(current_user.id, contacts_data, group_ids_list)
     
     return {
-        "status": "success", 
-        "message": f"Successfully received {len(contacts_data)} emails! They are now being processed in the background."
+        "status": "success",
+        "message": f"Received {len(contacts_data)} emails. Verifying deliverability and importing valid ones in the background — dead/invalid addresses are skipped."
     }
 

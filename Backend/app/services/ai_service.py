@@ -113,9 +113,11 @@ async def personalize_email(subject: str, body: str, recipient_name: str, recipi
 
     Here are the strict rules for the identities:
     1. THE RECIPIENT: Their name is {recipient_name}. If provided, they work at {recipient_company} as a {recipient_role}.
-    2. THE SENDER: You represent the sender. You DO NOT work at {recipient_company}. 
-    3. RULE: Never start the email with "Greetings from {recipient_company}". 
+    2. THE SENDER: You represent the sender. You DO NOT work at {recipient_company}.
+    3. RULE: Never start the email with "Greetings from {recipient_company}".
     4. RULE: Do not change the core meaning or links of the original draft.
+    5. RULE (CRITICAL): Do NOT invent or add any information, offer, price, date, statistic, link, attachment, or claim that is not already present in the original body. Only rephrase what is there. If a detail isn't in the original email, it must not appear in your output.
+    6. RULE: Preserve every existing hyperlink exactly as-is (keep all <a href="..."> URLs unchanged).
 
     If you mention their company, do it naturally in the context of the recipient (e.g., "I hope things are going well at {recipient_company}").
     """
@@ -144,6 +146,34 @@ async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -
     for v in variants:
         v['body'] = ensure_html_links(v.get('body', '')) # Force link conversion
     return variants
+
+async def optimize_email_content(subject: str, body: str) -> dict:
+    """Rewrite a low-engagement email to improve inbox placement WITHOUT adding
+    any information that isn't already in the original. Used by the worker's
+    automatic anti-spam rewrite when a campaign's engagement stays low."""
+    prompt = f"""This marketing email is getting very low engagement and is likely
+being filtered into spam folders. Rewrite it to maximize legitimate inbox
+placement and open rates, WITHOUT changing its factual meaning.
+
+Original Subject: {subject}
+Original Body (HTML): {body}
+
+Respond ONLY with a valid JSON object containing 'subject' and 'body' keys."""
+    system = """You are a senior email-deliverability specialist.
+STRICT RULES:
+1. DO NOT invent or add any information, offer, price, date, name, statistic, link, attachment, or claim that is not already present in the original email. Use only what is in the original.
+2. Preserve every existing hyperlink exactly (keep all <a href="..."> URLs unchanged). Do not add new links.
+3. Reduce spam-filter triggers: excessive capitalization, spammy phrases, too many exclamation marks, misleading or clickbait subject lines, all-image content.
+4. Keep the same language and roughly the same length. Output 'body' as clean structured HTML using <p>, <ul>, <li>, <strong>.
+5. Improve only tone, clarity, structure, and the subject line to avoid spam filters — never the underlying facts.
+Respond ONLY with valid JSON: {"subject": "...", "body": "..."}"""
+    raw = await call_llm(prompt, system)
+    data = extract_safe_json(raw)
+    data['body'] = ensure_html_links(data.get('body', body) or body)
+    if not data.get('subject'):
+        data['subject'] = subject
+    return data
+
 
 async def check_spam_score(subject: str, body: str) -> dict:
     prompt = f"""Analyze this email for spam filter risk. Be a spam filter expert.

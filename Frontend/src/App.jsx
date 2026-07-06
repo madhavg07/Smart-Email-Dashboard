@@ -436,8 +436,13 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
 
 function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) {
   const [reportData, setReportData] = useState(null);
+  const [reportCampaignId, setReportCampaignId] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const reportPollRef = useRef(null);
   const [sendModal, setSendModal] = useState(null);
   const [viewCampaign, setViewCampaign] = useState(null);
+  const [campaignRevisions, setCampaignRevisions] = useState([]);
+  const [openRevId, setOpenRevId] = useState(null);
   const [newCampModal, setNewCampModal] = useState(false);
   
   const [newCampName, setNewCampName] = useState("");
@@ -474,12 +479,59 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     });
   };
 
-  const viewReport = async (id) => {
+  // Cache-busted fetch — the report GET was being served stale (showing days-old
+  // data) because the response sat in an HTTP cache. The ?_t param + the backend
+  // no-store headers guarantee a fresh pull every time.
+  const loadReport = async (id, { silent = false } = {}) => {
+    if (!silent) setReportLoading(true);
     try {
-      const res = await api(`/campaigns/${id}/report`);
-      setReportData(res.logs);
-    } catch (e) { showToast("Failed to load report", "error"); }
+      const res = await api(`/campaigns/${id}/report?_t=${Date.now()}`);
+      setReportData(res.logs || []);
+    } catch (e) {
+      if (!silent) showToast("Failed to load report", "error");
+    } finally {
+      if (!silent) setReportLoading(false);
+    }
   };
+
+  const stopReportPolling = () => {
+    if (reportPollRef.current) {
+      clearInterval(reportPollRef.current);
+      reportPollRef.current = null;
+    }
+  };
+
+  const viewReport = async (id) => {
+    setReportCampaignId(id);
+    await loadReport(id);
+    // Keep the open report live as opens/clicks trickle in.
+    stopReportPolling();
+    reportPollRef.current = setInterval(() => loadReport(id, { silent: true }), 15000);
+  };
+
+  const closeReport = () => {
+    stopReportPolling();
+    setReportData(null);
+    setReportCampaignId(null);
+  };
+
+  // Clean up the report timer if the component unmounts with it open.
+  useEffect(() => stopReportPolling, []);
+
+  // Load content-revision history whenever the campaign detail modal opens.
+  useEffect(() => {
+    if (!viewCampaign) { setCampaignRevisions([]); setOpenRevId(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api(`/campaigns/${viewCampaign.id}/revisions?_t=${Date.now()}`);
+        if (!cancelled) setCampaignRevisions(res.revisions || []);
+      } catch {
+        if (!cancelled) setCampaignRevisions([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [viewCampaign]);
 
   const deleteCampaign = async (id) => {
     if (!window.confirm("Are you sure you want to delete this campaign?")) return;
@@ -653,12 +705,50 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
               <div style={{ background: "#ffffff", color: "#000", padding: 20, borderRadius: 8, border: "1px solid #d1d5db", maxHeight: "40vh", overflowY: "auto" }} dangerouslySetInnerHTML={{ __html: viewCampaign.body_html }} />
             )}
 
+            {campaignRevisions.length > 0 && (
+              <div style={{ marginTop: 20, borderTop: "1px solid #374151", paddingTop: 16 }}>
+                <div style={{ color: "#9ca3af", fontWeight: "bold", marginBottom: 4 }}>📝 Content History</div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10 }}>
+                  This campaign's content was automatically rewritten because engagement was low (likely spam-foldered). The version shown above is the current live one.
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {campaignRevisions.map(rev => (
+                    <div key={rev.id} style={{ background: "#0d1117", border: "1px solid #1f2937", borderRadius: 8, padding: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <span style={{ fontSize: 11, fontWeight: "bold", padding: "2px 8px", borderRadius: 4, marginRight: 8, background: rev.source === "auto_ai" ? "#1e3a8a" : "#374151", color: "#fff" }}>
+                            {rev.source === "auto_ai" ? "AI Rewrite" : rev.source === "original" ? "Original" : rev.source}
+                          </span>
+                          <span style={{ fontSize: 12, color: "#f9fafb" }}>{rev.subject}</span>
+                        </div>
+                        <button onClick={() => setOpenRevId(openRevId === rev.id ? null : rev.id)} style={{ flexShrink: 0, background: "transparent", color: "#60a5fa", border: "1px solid #1e3a8a", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 11 }}>
+                          {openRevId === rev.id ? "Hide" : "View"}
+                        </button>
+                      </div>
+                      {rev.reason && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>{rev.reason}</div>}
+                      {openRevId === rev.id && (
+                        <div style={{ background: "#ffffff", color: "#000", padding: 12, borderRadius: 6, marginTop: 8, maxHeight: "30vh", overflowY: "auto" }} dangerouslySetInnerHTML={{ __html: rev.body_html }} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
           </div>
         </ModalOverlay>
       )}
 
       {reportData && (
-        <ModalOverlay title="Detailed Tracking Report" onClose={() => setReportData(null)}>
+        <ModalOverlay title="Detailed Tracking Report" onClose={closeReport}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontSize: 12, color: "#6b7280" }}>
+              {reportData.length} recipient(s) · auto-refreshes every 15s
+            </span>
+            <button onClick={() => loadReport(reportCampaignId)} disabled={reportLoading} style={{ background: "#1f2937", color: "#60a5fa", border: "1px solid #374151", borderRadius: 6, padding: "6px 12px", cursor: reportLoading ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600 }}>
+              {reportLoading ? "Refreshing…" : "↻ Refresh"}
+            </button>
+          </div>
           <table style={{ width: "100%", textAlign: "left", color: "#d1d5db", fontSize: 13, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ color: "#9ca3af", borderBottom: "1px solid #374151" }}>
