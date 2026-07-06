@@ -119,7 +119,7 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
         campaign.status = "sending"
         db.commit()
         
-        process_campaign_queue.delay(campaign_id)
+        process_campaign_queue.delay(campaign_id, target_ids)
 
     except Exception as e:
         db.rollback()
