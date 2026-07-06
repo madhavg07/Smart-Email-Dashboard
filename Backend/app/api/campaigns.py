@@ -169,25 +169,35 @@ async def get_campaign_tracking_report(campaign_id: str, response: Response, db:
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
+    # Show EVERY send attempt for this campaign (most recent first), not just
+    # status=='sent'. The old strict filter hid rows whose final 'sent' commit
+    # didn't land (they stay 'queued'/'sending'), which made the report look
+    # frozen even while sending continued. We cap the payload because a 33k
+    # campaign would otherwise return tens of thousands of rows in one response.
+    REPORT_ROW_CAP = 2000
+    total_logs = db.query(SendLog).filter(SendLog.campaign_id == campaign_id).count()
     results = (
         db.query(SendLog, Recipient)
         .outerjoin(Recipient, SendLog.recipient_id == Recipient.id)
-        .filter(SendLog.campaign_id == campaign_id, SendLog.status == 'sent')
+        .filter(SendLog.campaign_id == campaign_id)
+        .order_by(SendLog.sent_at.desc())
+        .limit(REPORT_ROW_CAP)
         .all()
     )
-    
+
     report = []
     for log, recipient in results:
         report.append({
             "email": recipient.email if recipient else "Unknown",
             "name": recipient.name if recipient else "Unknown",
             "variant": getattr(log, 'variant', 'A'),
-            "opens": log.open_count,
-            "clicks": log.click_count,
-            "first_opened": log.first_opened_at
+            "opens": log.open_count or 0,
+            "clicks": log.click_count or 0,
+            "status": getattr(log, 'status', None),
+            "first_opened": log.first_opened_at,
         })
-        
-    return {"logs": report}
+
+    return {"logs": report, "total": total_logs, "showing": len(report)}
 
 @router.get("/{campaign_id}/revisions")
 async def get_campaign_revisions(campaign_id: str, response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

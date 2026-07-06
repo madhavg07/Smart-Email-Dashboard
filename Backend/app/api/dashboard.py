@@ -20,8 +20,8 @@ def get_analytics_dashboard(db: Session = Depends(get_db)):
         total_sent_query = db.query(func.sum(Campaign.total_sent)).scalar()
         total_sent = total_sent_query if total_sent_query else 0
 
-        total_opens = db.query(func.sum(Recipient.opens)).scalar() or 0
-        total_clicks = db.query(func.sum(Recipient.clicks)).scalar() or 0
+        total_opens = db.query(func.sum(Recipient.total_opens)).scalar() or 0
+        total_clicks = db.query(func.sum(Recipient.total_clicks)).scalar() or 0
 
         avg_open_rate = 0.0
         avg_click_rate = 0.0
@@ -57,8 +57,8 @@ def get_analytics_dashboard(db: Session = Depends(get_db)):
         # 3. Gather Engagement Score Breakdown (Pie Chart Data)
         # High Engagement: Score > 5 | Medium Engagement: Score 1-5 | Inactive: Score 0
         engagement_case = case(
-            ( (Recipient.opens * 1 + Recipient.clicks * 2) > 5, 'High Engagement' ),
-            ( (Recipient.opens * 1 + Recipient.clicks * 2) > 0, 'Medium Engagement' ),
+            ( (Recipient.total_opens * 1 + Recipient.total_clicks * 2) > 5, 'High Engagement' ),
+            ( (Recipient.total_opens * 1 + Recipient.total_clicks * 2) > 0, 'Medium Engagement' ),
             else_='Inactive / No Response'
         ).label('tier')
 

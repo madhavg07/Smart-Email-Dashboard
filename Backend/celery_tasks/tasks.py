@@ -208,8 +208,8 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         server.send_message(msg)
         server.quit()
 
-        recipient.total_emails_received = Recipient.total_emails_received + 1
-        campaign.total_sent = Campaign.total_sent + 1
+        recipient.total_emails_received = (recipient.total_emails_received or 0) + 1
+        campaign.total_sent = (campaign.total_sent or 0) + 1
         campaign.sent_at = datetime.utcnow()
         
         if campaign.status == "sending":
