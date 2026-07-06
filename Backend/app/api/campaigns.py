@@ -6,7 +6,7 @@ from app.models.database import get_db, Recipient, Campaign, SendLog, OpenEvent,
 from typing import List, Optional
 from datetime import datetime
 from app.services.auth_services import get_current_user # THE BOUNCER
-
+from celery_tasks.tasks import process_campaign_queue
 router = APIRouter()
 
 class CampaignCreate(BaseModel):
@@ -58,7 +58,6 @@ class SendRequest(BaseModel):
 
 @router.post("/{campaign_id}/send")
 async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # SECURITY: Make sure they actually own this campaign before sending!
     campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -75,7 +74,6 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
                 final_recipient_ids.add(rid)
         
         if payload.group_ids:
-            # SECURITY: Only pull recipients they own
             all_recs = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.is_suppressed == False).all()
             for r in all_recs:
                 meta = r.metadata_ or {}
@@ -94,10 +92,6 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
 
     target_ids = list(final_recipient_ids)
 
-    # --- Durable enqueue into the Postgres send_queue (source of truth) --------
-    # Every recipient gets a persistent row. If Redis/the worker/the VM dies,
-    # nothing is lost -- the worker resumes straight from these rows. We skip any
-    # recipient already queued for this campaign so re-sends can't duplicate.
     try:
         already = {
             r[0] for r in db.query(SendQueue.recipient_id)
@@ -108,7 +102,6 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
         for idx, rid in enumerate(target_ids):
             if rid in already:
                 continue
-            # Decide A/B variant deterministically at enqueue time.
             variant = "B" if (campaign.is_ab_test and idx % 2 != 0) else "A"
             new_rows.append(SendQueue(
                 campaign_id=campaign_id,
@@ -125,6 +118,9 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
             db.bulk_save_objects(new_rows)
         campaign.status = "sending"
         db.commit()
+        
+        process_campaign_queue.delay(campaign_id)
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to enqueue campaign: {e}")
@@ -135,7 +131,6 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
         "queued": len(new_rows),
         "already_queued": len(target_ids) - len(new_rows),
     }
-
 
 @router.get("/{campaign_id}/queue-status")
 async def campaign_queue_status(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -233,6 +228,8 @@ async def delete_campaign(campaign_id: str, db: Session = Depends(get_db), curre
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     
+    db.query(SendQueue).filter(SendQueue.campaign_id == campaign_id).delete()
+    db.query(CampaignContentRevision).filter(CampaignContentRevision.campaign_id == campaign_id).delete()
     db.query(OpenEvent).filter(OpenEvent.campaign_id == campaign_id).delete()
     db.query(ClickEvent).filter(ClickEvent.campaign_id == campaign_id).delete()
     db.query(SendLog).filter(SendLog.campaign_id == campaign_id).delete()
