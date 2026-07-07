@@ -25,11 +25,24 @@ class AddSenderRequest(BaseModel):
 
 @router.get("")
 def get_senders(
-    db: Session = Depends(get_db), 
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     senders = db.query(SenderAccount).filter(SenderAccount.user_id == current_user.id).all()
-    return senders
+    # Return explicit fields only — never leak encrypted credentials, and keep the
+    # payload JSON-safe (returning raw ORM objects risked serialization 500s).
+    return [
+        {
+            "id": s.id,
+            "email_address": s.email_address,
+            "provider": s.provider,
+            "daily_limit": s.daily_limit,
+            "sent_today": s.sent_today or 0,
+            "is_active": bool(s.is_active),
+            "created_at": s.created_at,
+        }
+        for s in senders
+    ]
 
 @router.post("/add")
 def add_sender_account(req: AddSenderRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -55,8 +68,47 @@ def add_sender_account(req: AddSenderRequest, db: Session = Depends(get_db), cur
     return {"status": "success", "message": f"{req.email_address} added to rotation pool (warming up from 30/day)."}
 
 
+class ToggleActiveRequest(BaseModel):
+    is_active: bool
+
+
+@router.patch("/{sender_id}/active")
+def set_sender_active(sender_id: int, req: ToggleActiveRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Enable/disable a sender for sending. Inactive senders are skipped by the
+    rotation picker (get_available_sender filters is_active == True)."""
+    sender = db.query(SenderAccount).filter(
+        SenderAccount.id == sender_id,
+        SenderAccount.user_id == current_user.id,
+    ).first()
+    if not sender:
+        raise HTTPException(status_code=404, detail="Sender account not found")
+    sender.is_active = req.is_active
+    db.commit()
+    return {"id": sender.id, "is_active": sender.is_active}
+
+
 @router.get("/status")
 def get_sender_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Per-sender warmup + remaining daily quota, for the dashboard."""
     return sender_status(db, current_user.id, SenderAccount)
+
+
+class ToggleSenderRequest(BaseModel):
+    is_active: bool
+
+
+@router.patch("/{sender_id}/toggle")
+def toggle_sender_active(sender_id: int, payload: ToggleSenderRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Activate/deactivate a sender. Inactive accounts are skipped by the sender
+    picker (get_available_sender filters is_active == True), so this immediately
+    controls whether the account is used for sending."""
+    sender = db.query(SenderAccount).filter(
+        SenderAccount.id == sender_id,
+        SenderAccount.user_id == current_user.id,
+    ).first()
+    if not sender:
+        raise HTTPException(status_code=404, detail="Sender account not found")
+    sender.is_active = payload.is_active
+    db.commit()
+    return {"id": sender.id, "is_active": bool(sender.is_active)}
 

@@ -100,6 +100,47 @@ def ensure_html_links(text: str) -> str:
     url_pattern = r'(?<!href=")(https?://[^\s<)\]]+)'
     return re.sub(url_pattern, r'<a href="\1">\1</a>', text)
 
+
+def _extract_urls(text: str) -> set:
+    """All URLs present in a piece of HTML/text (href targets + raw URLs)."""
+    if not text:
+        return set()
+    urls = set(re.findall(r'href=[\'"]([^\'"]+)[\'"]', text))
+    urls |= set(re.findall(r'(?<!href=")(?<!href=\')(https?://[^\s<)\]"\']+)', text))
+    return {u.rstrip('/').strip() for u in urls}
+
+
+def sanitize_ai_links(new_body: str, original_body: str) -> str:
+    """
+    Guardrail: the AI must NOT invent links. Remove from `new_body` any hyperlink
+    whose URL was not present in `original_body`, keeping the visible anchor text.
+    Also strips leftover raw invented URLs. If the original had no links at all,
+    the result will have no links either.
+    """
+    if not new_body:
+        return new_body
+    allowed = _extract_urls(original_body)
+
+    # 1) Unwrap <a href="X">text</a> where X is not an allowed URL -> keep "text".
+    def _unwrap(match):
+        href = match.group(1).rstrip('/').strip()
+        inner = match.group(2)
+        if href in allowed or href.startswith("mailto:"):
+            return match.group(0)  # keep legitimate/original link
+        return inner  # invented link -> drop the anchor, keep the words
+
+    new_body = re.sub(r'<a\b[^>]*href=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</a>',
+                      _unwrap, new_body, flags=re.IGNORECASE | re.DOTALL)
+
+    # 2) Remove any remaining raw invented URLs (not in the original).
+    def _strip_raw(match):
+        url = match.group(0).rstrip('/').strip()
+        return match.group(0) if url in allowed else ""
+
+    new_body = re.sub(r'(?<!href=")(?<!href=\')(https?://[^\s<)\]"\']+)',
+                      _strip_raw, new_body)
+    return new_body
+
 async def personalize_email(subject: str, body: str, recipient_name: str, recipient_role: str = None, recipient_industry: str = None, recipient_company: str = None) -> dict:
     prompt = f"Rewrite this FULL email to personalize it for {recipient_name}.\n"
     if recipient_role: prompt += f"Role: {recipient_role}\n"
@@ -123,7 +164,9 @@ async def personalize_email(subject: str, body: str, recipient_name: str, recipi
     """
     raw = await call_llm(prompt, system)
     data = extract_safe_json(raw)
-    data['body'] = ensure_html_links(data.get('body', '')) # Force link conversion
+    body_out = ensure_html_links(data.get('body', '') or '')
+    # Guardrail: strip any links/URLs the AI invented that weren't in the original.
+    data['body'] = sanitize_ai_links(body_out, body)
     return data
 
 async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -> list:
@@ -140,11 +183,14 @@ async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -
     1. FULL LENGTH: The "body" MUST contain the FULL email. DO NOT summarize it into a single line. Keep all bullet points and details.
     2. HTML FORMATTING: The "body" MUST be formatted as structured HTML using <p>, <ul>, <li>, and <strong>.
     3. LINK CONSERVATION: You MUST wrap all URLs in <a href="..."> HTML tags.
+    4. DO NOT INVENT: Never add any link, URL, offer, price, date, statistic, phone number, or claim that is not already present in the original body. If the original has no links, your output must have no links. Only rephrase what is given.
     """
     raw = await call_llm(prompt, system)
     variants = extract_safe_json(raw)
     for v in variants:
-        v['body'] = ensure_html_links(v.get('body', '')) # Force link conversion
+        body_out = ensure_html_links(v.get('body', '') or '')
+        # Guardrail: strip any links/URLs the AI invented that weren't in the original.
+        v['body'] = sanitize_ai_links(body_out, body)
     return variants
 
 async def optimize_email_content(subject: str, body: str) -> dict:
@@ -169,7 +215,8 @@ STRICT RULES:
 Respond ONLY with valid JSON: {"subject": "...", "body": "..."}"""
     raw = await call_llm(prompt, system)
     data = extract_safe_json(raw)
-    data['body'] = ensure_html_links(data.get('body', body) or body)
+    body_out = ensure_html_links(data.get('body', body) or body)
+    data['body'] = sanitize_ai_links(body_out, body)
     if not data.get('subject'):
         data['subject'] = subject
     return data
