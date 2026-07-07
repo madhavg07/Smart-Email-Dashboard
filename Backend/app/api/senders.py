@@ -17,7 +17,7 @@ def get_db():
         db.close()
 
 class AddSenderRequest(BaseModel):
-    user_id: str
+    user_id: str | None = None  # ignored; kept for backward-compat with the frontend
     email_address: str
     password_or_api_key: str
     provider: str = "smtp"
@@ -32,20 +32,16 @@ def get_senders(
     return senders
 
 @router.post("/add")
-def add_sender_account(req: AddSenderRequest, db: Session = Depends(get_db)):
-    real_user = db.query(User).filter(User.email == req.user_id).first()
-    
-    if not real_user:
-        raise HTTPException(status_code=404, detail="User not found in database.")
-
+def add_sender_account(req: AddSenderRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Ownership: bind the sender to the authenticated user, NOT a client-supplied id.
     existing = db.query(SenderAccount).filter(SenderAccount.email_address == req.email_address).first()
     if existing:
         raise HTTPException(status_code=400, detail="Sender account already exists.")
-    
+
     encrypted_creds = encrypt_password(req.password_or_api_key)
-    
+
     new_sender = SenderAccount(
-        user_id=real_user.id,
+        user_id=current_user.id,
         email_address=req.email_address,
         provider=req.provider,
         credentials=encrypted_creds,

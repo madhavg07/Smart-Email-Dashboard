@@ -119,7 +119,9 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
         campaign.status = "sending"
         db.commit()
         
-        process_campaign_queue.delay(campaign_id, target_ids)
+        # Pass personalize + sender_name through, otherwise the custom "From"
+        # name and the AI-personalization toggle are silently dropped.
+        process_campaign_queue.delay(campaign_id, target_ids, personalize, sender_name)
 
     except Exception as e:
         db.rollback()
@@ -254,8 +256,9 @@ class CampaignUpdate(BaseModel):
     body_html: str
 
 @router.put("/{campaign_id}")
-def update_campaign(campaign_id: str, payload: CampaignUpdate, db: Session = Depends(get_db)):
-    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+def update_campaign(campaign_id: str, payload: CampaignUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Ownership check: only the campaign's owner may edit it.
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     campaign.body_html = payload.body_html

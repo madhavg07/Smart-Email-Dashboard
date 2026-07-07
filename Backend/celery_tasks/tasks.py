@@ -34,7 +34,11 @@ celery_app.conf.update(
     # redis_backend_use_ssl={'ssl_cert_reqs': ssl.CERT_NONE},
     broker_connection_retry_on_startup=True,
     redis_socket_keepalive=True,
-    broker_pool_limit=None,
+    # Cap broker connections. Redis Cloud free/low tiers have a small client
+    # limit; an unbounded pool (None) can spike connections and trip the cap
+    # ("max number of clients reached"), stalling sends. A finite pool is plenty
+    # for concurrency=2.
+    broker_pool_limit=10,
     worker_prefetch_multiplier=1,
     broker_transport_options={
         'visibility_timeout': 3600,

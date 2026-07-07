@@ -65,8 +65,11 @@ class SenderAccount(Base):
     __tablename__ = "sender_accounts"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    
+    # NOTE: the real DB column is VARCHAR (users.id is a UUID string). The model
+    # previously said Integer, which was wrong-on-paper; aligned to String so
+    # SQLAlchemy binds/compares types correctly. No data migration needed.
+    user_id = Column(String, ForeignKey("users.id"))
+
     email_address = Column(String, unique=True)
     provider = Column(String) # "smtp", "sendgrid", "gmail"
     credentials = Column(String) # Encrypted password or API key

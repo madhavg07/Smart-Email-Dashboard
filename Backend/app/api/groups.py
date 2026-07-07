@@ -35,12 +35,13 @@ def create_group(payload: GroupCreate, db: Session = Depends(get_db), current_us
     return new_group
 
 @router.post("/{group_id}/add_recipient")
-def add_recipient_to_group(group_id: str, payload: AddRecipientPayload, db: Session = Depends(get_db)):
-    g = db.query(Group).filter(Group.id == group_id).first()
+def add_recipient_to_group(group_id: str, payload: AddRecipientPayload, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Ownership: the group AND the recipient must belong to the caller.
+    g = db.query(Group).filter(Group.id == group_id, Group.user_id == current_user.id).first()
     if not g:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    r = db.query(Recipient).filter(Recipient.id == payload.recipient_id).first()
+    r = db.query(Recipient).filter(Recipient.id == payload.recipient_id, Recipient.user_id == current_user.id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Recipient not found")
 
@@ -57,11 +58,12 @@ def add_recipient_to_group(group_id: str, payload: AddRecipientPayload, db: Sess
     return {"status": "success"}
 
 @router.delete("/{group_id}")
-def delete_group(group_id: str, db: Session = Depends(get_db)):
-    g = db.query(Group).filter(Group.id == group_id).first()
+def delete_group(group_id: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Ownership: only the group's owner may delete it.
+    g = db.query(Group).filter(Group.id == group_id, Group.user_id == current_user.id).first()
     if not g:
         raise HTTPException(status_code=404, detail="Group not found")
-    
+
     db.delete(g)
     db.commit()
     return {"status": "success"}
