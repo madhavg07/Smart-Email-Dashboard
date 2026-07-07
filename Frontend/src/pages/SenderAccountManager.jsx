@@ -168,10 +168,20 @@ export default function SenderAccountManager({ showToast }) {
                   Daily Limit: {acc.daily_limit}
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#4ade80", fontSize: 14, fontWeight: "bold", background: "rgba(74, 222, 128, 0.1)", padding: "6px 12px", borderRadius: 8 }}>
-                <div style={{ width: 8, height: 8, background: "#4ade80", borderRadius: "50%" }}></div>
-                Active
-              </div>
+              <button 
+                onClick={() => toggleSenderStatus(sender)}
+                style={{ 
+                    padding: "6px 12px", 
+                    borderRadius: 6, 
+                    cursor: "pointer", 
+                    fontWeight: "bold",
+                    border: "none",
+                    background: sender.is_active ? "#065f46" : "#7f1d1d", // Dark Green / Dark Red
+                    color: sender.is_active ? "#34d399" : "#fca5a5"       // Light Green / Light Red
+                }}
+            >
+                {sender.is_active ? "🟢 Active" : "🔴 Inactive"}
+            </button>
             </div>
           ))}
         </div>

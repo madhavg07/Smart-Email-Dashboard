@@ -9,10 +9,6 @@ from app.services.auth_services import get_current_user
 
 router = APIRouter(prefix="/api/senders", tags=["Senders"])
 
-
-class ToggleActiveRequest(BaseModel):
-    is_active: bool
-
 def get_db():
     db = SessionLocal()
     try:
@@ -73,43 +69,26 @@ def add_sender_account(req: AddSenderRequest, db: Session = Depends(get_db), cur
 
 
 
-@router.patch("/{sender_id}/active")
-def set_sender_active(sender_id: int, req: ToggleActiveRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Enable/disable a sender for sending. Inactive senders are skipped by the
-    rotation picker (get_available_sender filters is_active == True)."""
-    sender = db.query(SenderAccount).filter(
-        SenderAccount.id == sender_id,
-        SenderAccount.user_id == current_user.id,
-    ).first()
-    if not sender:
-        raise HTTPException(status_code=404, detail="Sender account not found")
-    sender.is_active = req.is_active
-    db.commit()
-    return {"id": sender.id, "is_active": sender.is_active}
-
-
 @router.get("/status")
 def get_sender_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Per-sender warmup + remaining daily quota, for the dashboard."""
     return sender_status(db, current_user.id, SenderAccount)
 
 
-class ToggleSenderRequest(BaseModel):
+class SenderStatusUpdate(BaseModel):
     is_active: bool
 
-
-@router.patch("/{sender_id}/toggle")
-def toggle_sender_active(sender_id: int, payload: ToggleSenderRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Activate/deactivate a sender. Inactive accounts are skipped by the sender
-    picker (get_available_sender filters is_active == True), so this immediately
-    controls whether the account is used for sending."""
+@router.put("/{sender_id}/status")
+def update_sender_status(sender_id: int, payload: SenderStatusUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Enable/disable a sender for sending. Updates the Neon Postgres database."""
     sender = db.query(SenderAccount).filter(
         SenderAccount.id == sender_id,
-        SenderAccount.user_id == current_user.id,
+        SenderAccount.user_id == current_user.id
     ).first()
+    
     if not sender:
         raise HTTPException(status_code=404, detail="Sender account not found")
+        
     sender.is_active = payload.is_active
     db.commit()
-    return {"id": sender.id, "is_active": bool(sender.is_active)}
-
+    return {"status": "updated", "is_active": sender.is_active}

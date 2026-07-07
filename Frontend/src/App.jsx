@@ -188,7 +188,7 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
 
 function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSkip, limit }) {
   const [filter, setFilter] = useState("all");
-  const [search, setSearch] = useState("");
+  // const [search, setSearch] = useState("");
   const [newRecipient, setNewRecipient] = useState({ email: "", name: "", role: "", industry: "", company: "", newGroupName: "" });
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -199,13 +199,33 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
   const safeRecipients = Array.isArray(recipients) ? recipients : (recipients?.data || []);
   const totalCount = recipients?.total || safeRecipients.length;
 
-  const filtered = safeRecipients.filter(r => {
-    if (filter === "suppressed" && !r.is_suppressed) return false;
-    if (filter === "hot" && (r.seriousness_score || 0) < 0.75) return false;
-    if (filter === "active" && r.is_suppressed) return false;
-    if (search && !(r.email || "").includes(search) && !(r.name || "").toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortBy, setSortBy] = useState("default");
+
+  // Unified Filter & Sort Pipeline
+  const processedRecipients = safeRecipients
+    .filter(r => {
+      // 1. Tab Filters
+      if (filter === "suppressed" && !r.is_suppressed) return false;
+      if (filter === "hot" && (r.seriousness_score || 0) < 0.75) return false;
+      if (filter === "active" && r.is_suppressed) return false;
+      
+      // 2. Search Bar Filter
+      const term = searchTerm.toLowerCase();
+      if (term) {
+        const emailMatch = (r.email || "").toLowerCase().includes(term);
+        const nameMatch = (r.name || "").toLowerCase().includes(term);
+        if (!emailMatch && !nameMatch) return false;
+      }
+      
+      return true;
+    })
+    .sort((a, b) => {
+      // 3. Sort Logic
+      if (sortBy === "opens") return (b.total_opens || 0) - (a.total_opens || 0);
+      if (sortBy === "clicks") return (b.total_clicks || 0) - (a.total_clicks || 0);
+      return 0;
+    });
 
   const toggleSuppress = async (id, suppress) => {
     try {
@@ -368,6 +388,24 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
           </button>
         ))}
       </div>
+      <div style={{ display: "flex", gap: 15, marginBottom: 20 }}>
+        <input 
+            type="text" 
+            placeholder="🔍 Search email or name..." 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{ padding: "10px", borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", flex: 1 }}
+        />
+        <select 
+            value={sortBy} 
+            onChange={(e) => setSortBy(e.target.value)}
+            style={{ padding: "10px", borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }}
+        >
+            <option value="default">Default Sort</option>
+            <option value="opens">🔥 Most Opens</option>
+            <option value="clicks">🖱️ Most Clicks</option>
+        </select>
+      </div>
 
       <div style={{ background: "#111827", borderRadius: 12, border: "1px solid #1f2937", overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -377,7 +415,7 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
             </tr>
           </thead>
           <tbody>
-            {filtered.map(r => {
+            {processedRecipients.map(r => {
               const rGroups = (r.metadata_?.group_ids || []).map(id => groups.find(g => g.id === id)?.name).filter(Boolean);
               return (
                 <tr key={r.id} style={{ borderBottom: "1px solid #0f172a", opacity: r.is_suppressed ? 0.5 : 1 }}>
@@ -466,6 +504,8 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const [sendSenderName, setSendSenderName] = useState("");
   const [useAIPersonalization, setUseAIPersonalization] = useState(false);
 
+  const [reportSearch, setReportSearch] = useState("");
+
   const { data: fetchedCampaigns, isLoading, refresh } = useApiCache('campaigns', async () => {
         const response = await api.get('/campaigns/'); 
         return response.data;
@@ -482,11 +522,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     return dateB - dateA;
   });
 
-  const sortedCampaigns = [...campaigns].sort((a, b) => {
-    const dateA = new Date(a.sent_at || a.created_at || 0);
-    const dateB = new Date(b.sent_at || b.created_at || 0);
-    return dateB - dateA;
-  });
 
   const formatDate = (dateString) => {
     if (!dateString) return "Not sent yet";
@@ -667,12 +702,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
           </button>
         </div>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb" }}>Campaigns</h1>
-        <button onClick={() => setNewCampModal(true)} style={{ background: "#3b82f6", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
-          + New Campaign
-        </button>
-      </div>
 
       {newCampModal && (
         <ModalOverlay title="Create New Campaign" onClose={() => setNewCampModal(false)}>
@@ -787,8 +816,18 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
                 <th style={{ padding: "8px 0" }}>Clicks</th>
               </tr>
             </thead>
+            {/* The new search bar */}
+            <input 
+                type="text" 
+                placeholder="🔍 Search recipient..." 
+                value={reportSearch}
+                onChange={(e) => setReportSearch(e.target.value)}
+                style={{ width: "100%", padding: "10px", marginBottom: "15px", borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }}
+            />
             <tbody>
-              {reportData.map((log, i) => (
+              {reportData
+                .filter(log => (log.email || "").toLowerCase().includes(reportSearch.toLowerCase()))
+                .map((log, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid #1f2937" }}>
                   <td style={{ padding: "10px 0", color: "#f9fafb" }}>{log.email}</td>
                   <td style={{ padding: "10px 0" }}><span style={{ background: log.variant === 'A' ? '#374151' : '#1e3a8a', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>{log.variant}</span></td>
