@@ -466,13 +466,21 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const [sendSenderName, setSendSenderName] = useState("");
   const [useAIPersonalization, setUseAIPersonalization] = useState(false);
 
-  const { data: campaigns, isLoading, refresh } = useApiCache('campaigns', async () => {
-        // Remember your trailing slash rule for collection endpoints!
+  const { data: fetchedCampaigns, isLoading, refresh } = useApiCache('campaigns', async () => {
         const response = await api.get('/campaigns/'); 
         return response.data;
-    });
+  });
 
-    if (isLoading) return <div>Loading...</div>;
+  if (isLoading) return <div>Loading...</div>;
+
+  // 2. Safely combine them: use the freshly fetched data, or fallback to the prop
+  const currentCampaigns = fetchedCampaigns || campaigns || [];
+
+  const sortedCampaigns = [...currentCampaigns].sort((a, b) => {
+    const dateA = new Date(a.sent_at || a.created_at || 0);
+    const dateB = new Date(b.sent_at || b.created_at || 0);
+    return dateB - dateA;
+  });
 
   const sortedCampaigns = [...campaigns].sort((a, b) => {
     const dateA = new Date(a.sent_at || a.created_at || 0);
@@ -648,20 +656,16 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   return (
     
     <div>
-      <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <h2>Campaigns</h2>
-              
-              {/* 3. Attach the refresh function to your button */}
-              <button onClick={refresh} className="btn-secondary">
-                  ⟳ Refresh
-              </button>
-          </div>
-
-          {/* Render your campaigns here */}
-          {campaigns?.map(c => (
-              <div key={c.id}>{c.name}</div>
-          ))}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+        <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb" }}>Campaigns</h1>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button onClick={refresh} style={{ background: "#374151", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
+            ⟳ Refresh
+          </button>
+          <button onClick={() => setNewCampModal(true)} style={{ background: "#3b82f6", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
+            + New Campaign
+          </button>
+        </div>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb" }}>Campaigns</h1>
