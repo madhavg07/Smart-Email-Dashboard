@@ -207,8 +207,7 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         else:
             msg['From'] = sender.email_address
         msg['To'] = recipient.email
-        msg.add_alternative(full_html, subtype='html')
-
+        msg.set_content(full_html, subtype='html')
         server.send_message(msg)
         server.quit()
 

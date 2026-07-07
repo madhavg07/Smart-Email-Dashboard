@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def is_security_bot(user_agent: str) -> bool:
     if not user_agent:
         return True
-    bot_pattern = r'bot|crawler|spider|preview|scan|paloalto|barracuda|mimecast|zscaler|python|curl|wget'
+    bot_pattern = r'bot|crawler|spider|preview|scan|paloalto|barracuda|mimecast|zscaler|python|curl|wget|googleimageproxy|apple'
     return bool(re.search(bot_pattern, user_agent, re.IGNORECASE))
 
 async def log_pixel_hit(token: str, request: Request):

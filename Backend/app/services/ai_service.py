@@ -76,7 +76,7 @@ async def _call_openai(prompt: str, system: str) -> str:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                json={"model": "llama-3.1-8b-instant", "messages": messages, "max_tokens": 1500},
+                json={"model": "llama-3.1-8b-instant", "messages": messages, "max_tokens": 3000,"response_format": {"type": "json_object"}},
             )
             
             if resp.status_code in [429, 500, 502, 503, 529]:
@@ -169,16 +169,18 @@ async def personalize_email(subject: str, body: str, recipient_name: str, recipi
     data['body'] = sanitize_ai_links(body_out, body)
     return data
 
-async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -> list:
+async def generate_ab_variants(subject: str, body: str, num_variants: int = 2) -> list:
+    # Changed prompt to explicitly ask for the {"variants": [...]} wrapper
     prompt = f"""
     Create {num_variants} different A/B test variants for this email.
     Original Subject: {subject}
     Original Body: {body}
     
-    Respond ONLY with a valid JSON array of objects. Each object must have "subject", "body", "angle", and "rationale".
+    Respond ONLY with a valid JSON object containing a single key "variants". 
+    The value of "variants" must be an array of objects. Each object must have "subject", "body", "angle", and "rationale".
     """
     system = """
-    You are a conversion copywriter. Output strictly in JSON array format.
+    You are a conversion copywriter. Output strictly a JSON object with a "variants" array.
     CRITICAL INSTRUCTIONS:
     1. FULL LENGTH: The "body" MUST contain the FULL email. DO NOT summarize it into a single line. Keep all bullet points and details.
     2. HTML FORMATTING: The "body" MUST be formatted as structured HTML using <p>, <ul>, <li>, and <strong>.
@@ -186,7 +188,11 @@ async def generate_ab_variants(subject: str, body: str, num_variants: int = 3) -
     4. DO NOT INVENT: Never add any link, URL, offer, price, date, statistic, phone number, or claim that is not already present in the original body. If the original has no links, your output must have no links. Only rephrase what is given.
     """
     raw = await call_llm(prompt, system)
-    variants = extract_safe_json(raw)
+    parsed_data = extract_safe_json(raw)
+    
+    # Safely extract the array from the wrapper object (or fallback if the LLM ignores instructions)
+    variants = parsed_data.get("variants", []) if isinstance(parsed_data, dict) else parsed_data
+    
     for v in variants:
         body_out = ensure_html_links(v.get('body', '') or '')
         # Guardrail: strip any links/URLs the AI invented that weren't in the original.
