@@ -181,8 +181,16 @@ async def personalize_email(subject: str, body: str, recipient_name: str, recipi
     """
     raw = await call_llm(prompt, system)
     data = extract_safe_json(raw)
-    body_out = ensure_html_links(data.get('body', '') or '')
-    data['body'] = sanitize_ai_links(body_out, body)
+    body_out = data.get('body', '')
+    if "<p>" not in body_out and "<br>" not in body_out:
+        body_out = body_out.replace("\n", "<br><br>")
+        
+    body_out = ensure_html_links(body_out)
+    
+    # BYPASS the aggressive sanitizer for now so it stops deleting your links!
+    # data['body'] = sanitize_ai_links(body_out, body)
+    data['body'] = body_out 
+    
     return data
 
 async def generate_ab_variants(subject: str, body: str, num_variants: int = 2) -> list:
@@ -210,9 +218,18 @@ async def generate_ab_variants(subject: str, body: str, num_variants: int = 2) -
     variants = parsed_data.get("variants", []) if isinstance(parsed_data, dict) else parsed_data
     
     for v in variants:
-        body_out = ensure_html_links(v.get('body', '') or '')
-        # Guardrail: strip any links/URLs the AI invented that weren't in the original.
-        v['body'] = sanitize_ai_links(body_out, body)
+        body_out = v.get('body', '')
+        
+        # FAILSAFE: Convert plain text to HTML line breaks if AI forgets
+        if "<p>" not in body_out and "<br>" not in body_out:
+            body_out = body_out.replace("\n", "<br><br>")
+            
+        body_out = ensure_html_links(body_out)
+        
+        # BYPASS the aggressive sanitizer so A/B variants keep their links
+        # v['body'] = sanitize_ai_links(body_out, body)
+        v['body'] = body_out
+        
     return variants
 
 async def optimize_email_content(subject: str, body: str) -> dict:
@@ -237,8 +254,19 @@ STRICT RULES:
 Respond ONLY with valid JSON: {"subject": "...", "body": "..."}"""
     raw = await call_llm(prompt, system)
     data = extract_safe_json(raw)
-    body_out = ensure_html_links(data.get('body', body) or body)
-    data['body'] = sanitize_ai_links(body_out, body)
+    
+    body_out = data.get('body', body) or body
+    
+    # FAILSAFE: Convert plain text to HTML line breaks if AI forgets
+    if "<p>" not in body_out and "<br>" not in body_out:
+        body_out = body_out.replace("\n", "<br><br>")
+        
+    body_out = ensure_html_links(body_out)
+    
+    # BYPASS the aggressive sanitizer so optimized emails keep their links
+    # data['body'] = sanitize_ai_links(body_out, body)
+    data['body'] = body_out
+    
     if not data.get('subject'):
         data['subject'] = subject
     return data

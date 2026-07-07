@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def is_security_bot(user_agent: str) -> bool:
     if not user_agent:
         return True
-    bot_pattern = r'bot|crawler|spider|preview|scan|paloalto|barracuda|mimecast|zscaler|python|curl|wget|googleimageproxy|apple'
+    bot_pattern = r'bot|crawler|spider|preview|scan|paloalto|barracuda|mimecast|zscaler|python|curl|wget'
     return bool(re.search(bot_pattern, user_agent, re.IGNORECASE))
 
 async def log_pixel_hit(token: str, request: Request):
@@ -24,6 +24,14 @@ async def log_pixel_hit(token: str, request: Request):
 
         if is_security_bot(user_agent):
             return
+        
+        time_since_sent = (datetime.utcnow() - send_log.sent_at).total_seconds()
+        
+        # If Apple or Google hits the pixel in under 60 seconds, it's a pre-fetch bot.
+        is_proxy = "googleimageproxy" in user_agent or "apple" in user_agent
+        if is_proxy and time_since_sent < 60:
+            logger.info(f"Blocked instant ghost open for {send_log.recipient_id}")
+            return # Ignore it completely!
 
         open_event = OpenEvent(
             send_log_id=send_log.id,
