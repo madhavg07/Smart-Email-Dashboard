@@ -511,37 +511,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
         return response.data;
   });
 
-  // Clean up the report timer if the component unmounts with it open.
-  useEffect(() => stopReportPolling, []);
-
-  // Load content-revision history whenever the campaign detail modal opens.
-  useEffect(() => {
-    if (!viewCampaign) { setCampaignRevisions([]); setOpenRevId(null); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await api(`/campaigns/${viewCampaign.id}/revisions?_t=${Date.now()}`);
-        if (!cancelled) setCampaignRevisions(res.revisions || []);
-      } catch {
-        if (!cancelled) setCampaignRevisions([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [viewCampaign]);
-
-  // Clean up the polling timer if the component unmounts mid-send.
-  useEffect(() => stopPolling, []);
-
-if (isLoading) return <div style={{ color: "#fff", padding: "20px" }}>Loading Campaigns...</div>;
-  // 2. Safely combine them: use the freshly fetched data, or fallback to the prop
-  const currentCampaigns = fetchedCampaigns || campaigns || [];
-
-  const sortedCampaigns = [...currentCampaigns].sort((a, b) => {
-    const dateA = new Date(a.sent_at || a.created_at || 0);
-    const dateB = new Date(b.sent_at || b.created_at || 0);
-    return dateB - dateA;
-  });
-
 
   const formatDate = (dateString) => {
     if (!dateString) return "Not sent yet";
@@ -572,6 +541,24 @@ if (isLoading) return <div style={{ color: "#fff", padding: "20px" }}>Loading Ca
       reportPollRef.current = null;
     }
   };
+
+  // Clean up the report timer if the component unmounts with it open.
+  useEffect(() => stopReportPolling, []);
+
+  // Load content-revision history whenever the campaign detail modal opens.
+  useEffect(() => {
+    if (!viewCampaign) { setCampaignRevisions([]); setOpenRevId(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api(`/campaigns/${viewCampaign.id}/revisions?_t=${Date.now()}`);
+        if (!cancelled) setCampaignRevisions(res.revisions || []);
+      } catch {
+        if (!cancelled) setCampaignRevisions([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [viewCampaign]);
 
   const viewReport = async (id) => {
     setReportCampaignId(id);
@@ -604,6 +591,19 @@ if (isLoading) return <div style={{ color: "#fff", padding: "20px" }}>Loading Ca
       pollRef.current = null;
     }
   };
+
+  // Clean up the polling timer if the component unmounts mid-send.
+  useEffect(() => stopPolling, []);
+
+  if (isLoading) return <div style={{ color: "#fff", padding: "20px" }}>Loading Campaigns...</div>;
+  // 2. Safely combine them: use the freshly fetched data, or fallback to the prop
+  const currentCampaigns = fetchedCampaigns || campaigns || [];
+
+  const sortedCampaigns = [...currentCampaigns].sort((a, b) => {
+    const dateA = new Date(a.sent_at || a.created_at || 0);
+    const dateB = new Date(b.sent_at || b.created_at || 0);
+    return dateB - dateA;
+  });
 
   const fetchProgress = async (campaignId) => {
     try {
