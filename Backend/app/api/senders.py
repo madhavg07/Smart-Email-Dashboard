@@ -9,6 +9,10 @@ from app.services.auth_services import get_current_user
 
 router = APIRouter(prefix="/api/senders", tags=["Senders"])
 
+
+class ToggleActiveRequest(BaseModel):
+    is_active: bool
+
 def get_db():
     db = SessionLocal()
     try:
@@ -23,7 +27,7 @@ class AddSenderRequest(BaseModel):
     provider: str = "smtp"
     daily_limit: int = 400  # ceiling; warmup starts new accounts at 30/day and ramps up
 
-@router.get("")
+@router.get("/")
 def get_senders(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -67,9 +71,6 @@ def add_sender_account(req: AddSenderRequest, db: Session = Depends(get_db), cur
     db.commit()
     return {"status": "success", "message": f"{req.email_address} added to rotation pool (warming up from 30/day)."}
 
-
-class ToggleActiveRequest(BaseModel):
-    is_active: bool
 
 
 @router.patch("/{sender_id}/active")
