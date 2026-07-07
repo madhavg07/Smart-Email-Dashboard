@@ -31,12 +31,26 @@ def extract_safe_json(raw_text: str):
         raise ValueError(f"AI failed to return valid JSON. Raw output: {raw_text}")
 
 async def call_llm(prompt: str, system: str = "") -> str:
-    if AI_PROVIDER == "anthropic" and ANTHROPIC_API_KEY:
+    # Always try Groq first if the key exists
+    if OPENAI_API_KEY:
+        try:
+            return await _call_openai(prompt, system)
+        except Exception as e:
+            logger.error(f"Primary AI (Groq) failed: {str(e)}")
+            
+            # If Groq fails, silently fall back to Anthropic
+            if ANTHROPIC_API_KEY:
+                logger.info("Falling back to Anthropic (Claude)...")
+                return await _call_anthropic(prompt, system)
+                
+            raise e # Crash only if we have absolutely no backup keys
+            
+    # If no Groq key, just use Anthropic
+    elif ANTHROPIC_API_KEY:
         return await _call_anthropic(prompt, system)
-    elif OPENAI_API_KEY:
-        return await _call_openai(prompt, system)
     else:
         raise ValueError("No AI API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.")
+
 
 async def _call_anthropic(prompt: str, system: str) -> str:
     async with httpx.AsyncClient(timeout=30) as client:
@@ -72,7 +86,7 @@ async def _call_openai(prompt: str, system: str) -> str:
 
     async with httpx.AsyncClient(timeout=30) as client:
         # Retries for BOTH Rate Limits (429) AND Server Overloads (500, 502, 503)
-        for attempt in range(3):
+        for attempt in range(4):
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -80,8 +94,9 @@ async def _call_openai(prompt: str, system: str) -> str:
             )
             
             if resp.status_code in [429, 500, 502, 503, 529]:
-                logger.warning(f"Groq API Overloaded/Rate Limited (HTTP {resp.status_code}). Retrying in 2.5s...")
-                await asyncio.sleep(2.5)
+                wait_time = float(resp.headers.get("Retry-After", 2 ** (attempt + 1)))
+                logger.warning(f"Groq API Overloaded/Rate Limited (HTTP {resp.status_code}). Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
                 continue
                 
             if resp.status_code != 200:
@@ -157,15 +172,16 @@ async def personalize_email(subject: str, body: str, recipient_name: str, recipi
     2. THE SENDER: You represent the sender. You DO NOT work at {recipient_company}.
     3. RULE: Never start the email with "Greetings from {recipient_company}".
     4. RULE: Do not change the core meaning or links of the original draft.
-    5. RULE (CRITICAL): Do NOT invent or add any information, offer, price, date, statistic, link, attachment, or claim that is not already present in the original body. Only rephrase what is there. If a detail isn't in the original email, it must not appear in your output.
+    5. RULE (CRITICAL): Do NOT invent or add any information, offer, price, date, statistic, link, attachment, or claim that is not already present in the original body. Only rephrase what is there.
     6. RULE: Preserve every existing hyperlink exactly as-is (keep all <a href="..."> URLs unchanged).
+    
+    7. HTML FORMATTING (CRITICAL): You MUST output the "body" as clean, structured HTML. Use <p> for paragraphs, <ul> and <li> for the bulleted lists, and <strong> for bold text. Do NOT output a single wall of plain text.
 
     If you mention their company, do it naturally in the context of the recipient (e.g., "I hope things are going well at {recipient_company}").
     """
     raw = await call_llm(prompt, system)
     data = extract_safe_json(raw)
     body_out = ensure_html_links(data.get('body', '') or '')
-    # Guardrail: strip any links/URLs the AI invented that weren't in the original.
     data['body'] = sanitize_ai_links(body_out, body)
     return data
 
