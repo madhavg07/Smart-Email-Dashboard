@@ -7,6 +7,7 @@ import {
 import { api, API_URL, getToken, setToken, clearToken } from './api';
 import AuthPage from './pages/AuthPage';
 import SenderAccountManager from './pages/SenderAccountManager';
+import { useApiCache } from './pages/useApiCache';
 
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
@@ -465,6 +466,14 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const [sendSenderName, setSendSenderName] = useState("");
   const [useAIPersonalization, setUseAIPersonalization] = useState(false);
 
+  const { data: campaigns, isLoading, refresh } = useApiCache('campaigns', async () => {
+        // Remember your trailing slash rule for collection endpoints!
+        const response = await api.get('/campaigns/'); 
+        return response.data;
+    });
+
+    if (isLoading) return <div>Loading...</div>;
+
   const sortedCampaigns = [...campaigns].sort((a, b) => {
     const dateA = new Date(a.sent_at || a.created_at || 0);
     const dateB = new Date(b.sent_at || b.created_at || 0);
@@ -637,7 +646,23 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   };
 
   return (
+    
     <div>
+      <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <h2>Campaigns</h2>
+              
+              {/* 3. Attach the refresh function to your button */}
+              <button onClick={refresh} className="btn-secondary">
+                  ⟳ Refresh
+              </button>
+          </div>
+
+          {/* Render your campaigns here */}
+          {campaigns?.map(c => (
+              <div key={c.id}>{c.name}</div>
+          ))}
+      </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb" }}>Campaigns</h1>
         <button onClick={() => setNewCampModal(true)} style={{ background: "#3b82f6", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>

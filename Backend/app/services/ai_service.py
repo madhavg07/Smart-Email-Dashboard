@@ -110,10 +110,23 @@ async def _call_openai(prompt: str, system: str) -> str:
 import re
 
 def ensure_html_links(text: str) -> str:
-    """Fallback: Forcefully convert any raw (https://...) into an HTML <a> tag so tracking works!"""
-    # Finds URLs inside parentheses (https://...) or raw URLs and wraps them in HTML
-    url_pattern = r'(?<!href=")(https?://[^\s<)\]]+)'
-    return re.sub(url_pattern, r'<a href="\1">\1</a>', text)
+    """Fallback: Forcefully convert raw URLs into HTML, but IGNORE URLs that are already inside <a> tags."""
+    if not text:
+        return text
+        
+    # This pattern looks for an entire existing <a...> tag OR a raw http/https URL.
+    pattern = r'(<a\b[^>]*>.*?</a>)|(https?://[^\s<)\]\'"]+)'
+    
+    def replacer(match):
+        # If group 1 matched, it's already a safe HTML anchor tag. Leave it completely alone.
+        if match.group(1):
+            return match.group(1)
+        
+        # If group 2 matched, it's a naked URL floating in plain text. Wrap it.
+        url = match.group(2)
+        return f'<a href="{url}">{url}</a>'
+        
+    return re.sub(pattern, replacer, text, flags=re.IGNORECASE | re.DOTALL)
 
 
 def _extract_urls(text: str) -> set:
