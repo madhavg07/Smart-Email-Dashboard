@@ -12,6 +12,7 @@ from typing import Optional
 
 from app.models.database import SendLog, get_db, Recipient, Group, OpenEvent, ClickEvent, User
 from app.services.auth_services import get_current_user
+from sqlalchemy import or_
 
 router = APIRouter()
 
@@ -28,18 +29,28 @@ class RecipientCreate(BaseModel):
 def list_recipients(
     skip: int = Query(0, description="How many records to skip"),
     limit: int = Query(100, le=500, description="How many records to return (max 500)"),
+    search: Optional[str] = Query(None, description="Search term for email or name"), # 1. Added Search Param
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    # 1. Get the total count so your frontend knows how many pages there are
-    total_count = db.query(Recipient).filter(Recipient.user_id == current_user.id).count()
+    # 2. Create the base query (do not execute it yet!)
+    query = db.query(Recipient).filter(Recipient.user_id == current_user.id)
     
-    # 2. Fetch ONLY the requested chunk using .offset() and .limit()
-    recipients = db.query(Recipient)\
-        .filter(Recipient.user_id == current_user.id)\
-        .offset(skip)\
-        .limit(limit)\
-        .all()
+    # 3. If a search term was passed, dynamically add the filter to the query
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                Recipient.email.ilike(search_term),
+                Recipient.name.ilike(search_term)
+            )
+        )
+        
+    # 4. Get the total count of the matched rows (so frontend knows if there are more pages)
+    total_count = query.count()
+    
+    # 5. Fetch ONLY the requested chunk using .offset() and .limit(), ordered newest first
+    recipients = query.order_by(Recipient.id.desc()).offset(skip).limit(limit).all()
         
     return {
         "total": total_count,

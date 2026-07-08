@@ -187,8 +187,8 @@ async def personalize_email(subject: str, body: str, recipient_name: str, recipi
     4. RULE: Do not change the core meaning or links of the original draft.
     5. RULE (CRITICAL): Do NOT invent or add any information, offer, price, date, statistic, link, attachment, or claim that is not already present in the original body. Only rephrase what is there.
     6. RULE: Preserve every existing hyperlink exactly as-is (keep all <a href="..."> URLs unchanged).
-    
     7. HTML FORMATTING (CRITICAL): You MUST output the "body" as clean, structured HTML. Use <p> for paragraphs, <ul> and <li> for the bulleted lists, and <strong> for bold text. Do NOT output a single wall of plain text.
+    8. ANTI-SPAM TONE (CRITICAL): Write in a warm, natural, human-to-human tone. Avoid stiff institutional jargon, excessive capitalization, or overly formal phrases like "We are pleased to inform you." Make it sound like an email from a colleague.
 
     If you mention their company, do it naturally in the context of the recipient (e.g., "I hope things are going well at {recipient_company}").
     """
@@ -222,7 +222,8 @@ async def generate_ab_variants(subject: str, body: str, num_variants: int = 2) -
     1. FULL LENGTH: The "body" MUST contain the FULL email. DO NOT summarize it into a single line. Keep all bullet points and details.
     2. HTML FORMATTING: The "body" MUST be formatted as structured HTML using <p>, <ul>, <li>, and <strong>.
     3. LINK CONSERVATION: You MUST wrap all URLs in <a href="..."> HTML tags.
-    4. DO NOT INVENT: Never add any link, URL, offer, price, date, statistic, phone number, or claim that is not already present in the original body. If the original has no links, your output must have no links. Only rephrase what is given.
+    4. DO NOT INVENT: Never add any link, URL, offer, price, date, statistic, phone number, or claim that is not already present in the original body.
+    5. ANTI-SPAM PROTOCOL: Ensure all variants sound like legitimate 1-on-1 emails, not bulk marketing blasts. Avoid words commonly flagged by spam filters (e.g., "Free", "Urgent", "Guarantee"). Do not use ALL CAPS in subject lines.
     """
     raw = await call_llm(prompt, system)
     parsed_data = extract_safe_json(raw)
@@ -261,9 +262,8 @@ Respond ONLY with a valid JSON object containing 'subject' and 'body' keys."""
 STRICT RULES:
 1. DO NOT invent or add any information, offer, price, date, name, statistic, link, attachment, or claim that is not already present in the original email. Use only what is in the original.
 2. Preserve every existing hyperlink exactly (keep all <a href="..."> URLs unchanged). Do not add new links.
-3. Reduce spam-filter triggers: excessive capitalization, spammy phrases, too many exclamation marks, misleading or clickbait subject lines, all-image content.
-4. Keep the same language and roughly the same length. Output 'body' as clean structured HTML using <p>, <ul>, <li>, <strong>.
-5. Improve only tone, clarity, structure, and the subject line to avoid spam filters — never the underlying facts.
+3. ANTI-SPAM PROTOCOL: Aggressively rewrite the email to sound like a casual, plain-text email sent from one human to another. Remove corporate buzzwords, "brochure" language, excessive exclamation marks, and overly formal greetings/sign-offs.
+4. Keep the same core facts. Output 'body' as clean structured HTML using <p>, <ul>, <li>, <strong>.
 Respond ONLY with valid JSON: {"subject": "...", "body": "..."}"""
     raw = await call_llm(prompt, system)
     data = extract_safe_json(raw)

@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback } from 'react';
 const globalCache = {};
 
 export function useApiCache(cacheKey, fetchFunction) {
-    // If the data is already in the cache, load it instantly
     const [data, setData] = useState(globalCache[cacheKey] || null);
     const [isLoading, setIsLoading] = useState(!globalCache[cacheKey]);
+    
+    // NEW: Tracks manual button clicks
+    const [isRefreshing, setIsRefreshing] = useState(false); 
     const [error, setError] = useState(null);
 
     const fetchData = useCallback(async (forceRefresh = false) => {
@@ -17,7 +19,10 @@ export function useApiCache(cacheKey, fetchFunction) {
             return;
         }
 
-        if (!globalCache[cacheKey]) setIsLoading(true);
+        // Trigger the refreshing state so our button reacts!
+        if (forceRefresh) setIsRefreshing(true);
+        else if (!globalCache[cacheKey]) setIsLoading(true);
+
         setError(null);
 
         try {
@@ -28,6 +33,7 @@ export function useApiCache(cacheKey, fetchFunction) {
             setError(err.message || "Failed to fetch data");
         } finally {
             setIsLoading(false);
+            setIsRefreshing(false); // Turn off the button spinner
         }
     }, [cacheKey, fetchFunction]);
 
@@ -38,5 +44,5 @@ export function useApiCache(cacheKey, fetchFunction) {
     // The function you will attach to your button
     const refresh = () => fetchData(true);
 
-    return { data, isLoading, error, refresh, setData };
+    return { data, isLoading, isRefreshing, error, refresh, setData };
 }

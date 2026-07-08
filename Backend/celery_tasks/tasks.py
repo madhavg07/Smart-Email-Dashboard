@@ -168,8 +168,7 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
                 pass
 
         tracking_token = str(uuid.uuid4())
-        invisible_spaces = '\u200B' * ((idx % 10) + 1)
-        unique_subject = active_subject + invisible_spaces
+        unique_subject = active_subject
 
         send_log = SendLog(
             campaign_id=campaign_id, recipient_id=recipient.id,

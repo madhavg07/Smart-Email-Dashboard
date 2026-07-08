@@ -188,7 +188,6 @@ function GroupsPage({ groups, recipients, onRefresh, showToast }) {
 
 function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSkip, limit }) {
   const [filter, setFilter] = useState("all");
-  // const [search, setSearch] = useState("");
   const [newRecipient, setNewRecipient] = useState({ email: "", name: "", role: "", industry: "", company: "", newGroupName: "" });
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -201,18 +200,50 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
 
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("default");
+  
+  // NEW: Global Server Search States
+  const [serverSearchResults, setServerSearchResults] = useState(null);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // THE GLOBAL SEARCH ENGINE
+  useEffect(() => {
+    // If the search bar is empty, clear the search results and return to normal pagination
+    if (!searchTerm.trim()) {
+      setServerSearchResults(null);
+      return;
+    }
+
+    // Wait 500ms after the user stops typing before hitting the backend
+    const debounceTimer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        // Appends the ?search parameter to ask the database to query all 33k records
+        const res = await api(`/recipients/?search=${encodeURIComponent(searchTerm)}&limit=100`);
+        setServerSearchResults(res.data || res);
+      } catch (err) {
+        console.error("Search failed", err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 500);
+
+    return () => clearTimeout(debounceTimer);
+  }, [searchTerm]);
+
+  // Determine Data Source: If a search is active, use the global results. Otherwise, use the standard 100 rows.
+  const currentDataPool = serverSearchResults !== null ? serverSearchResults : safeRecipients;
 
   // Unified Filter & Sort Pipeline
-  const processedRecipients = safeRecipients
+  const processedRecipients = currentDataPool
     .filter(r => {
       // 1. Tab Filters
       if (filter === "suppressed" && !r.is_suppressed) return false;
       if (filter === "hot" && (r.seriousness_score || 0) < 0.75) return false;
       if (filter === "active" && r.is_suppressed) return false;
       
-      // 2. Search Bar Filter
+      // 2. Local Fallback Search Filter
       const term = searchTerm.toLowerCase();
-      if (term) {
+      if (term && serverSearchResults === null) {
         const emailMatch = (r.email || "").toLowerCase().includes(term);
         const nameMatch = (r.name || "").toLowerCase().includes(term);
         if (!emailMatch && !nameMatch) return false;
@@ -249,12 +280,15 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
         method: "POST",
         body: JSON.stringify({ ...newRecipient, group_ids: selectedGroups, new_group_name: newRecipient.newGroupName || null })
       });
-      showToast("Recipient added successfully");
+      showToast("Recipient added successfully", "success");
       setNewRecipient({ email: "", name: "", role: "", industry: "", company: "", newGroupName: "" });
       setSelectedGroups([]);
       setShowGroupModal(false);
       onRefresh();
-    } catch (e) { showToast(e.message, "error"); }
+    } catch (e) { 
+      // This will instantly catch the 400 backend error if the email domain is dead!
+      showToast(e.message, "error"); 
+    }
     finally { setSaving(false); }
   };
 
@@ -269,7 +303,6 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
       const formData = new FormData();
       formData.append("file", file);
       
-      // Attach the selected group ID to the form data (if they chose one!)
       if (uploadGroupId) {
         formData.append("group_id", uploadGroupId);
       }
@@ -306,17 +339,8 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
         </h1>
         
         <div>
-          <input 
-            type="file" 
-            accept=".csv" 
-            ref={fileInputRef} 
-            onChange={handleFileUpload} 
-            style={{ display: "none" }} 
-          />
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-              {/* THE NEW DROPDOWN */}
               <select 
                 value={uploadGroupId} 
                 onChange={(e) => setUploadGroupId(e.target.value)}
@@ -391,10 +415,10 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
       <div style={{ display: "flex", gap: 15, marginBottom: 20 }}>
         <input 
             type="text" 
-            placeholder="🔍 Search email or name..." 
+            placeholder={isSearching ? "Searching 33k database..." : "🔍 Search entire database..."}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ padding: "10px", borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", flex: 1 }}
+            style={{ padding: "10px", borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", flex: 1, opacity: isSearching ? 0.7 : 1 }}
         />
         <select 
             value={sortBy} 
@@ -441,39 +465,37 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
             })}
           </tbody>
         </table>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px", background: "#0d1117", borderTop: "1px solid #1f2937" }}>
-          <div style={{ color: "#9ca3af", fontSize: 13 }}>
-            Showing {skip + 1} to {Math.min(skip + limit, totalCount)} of {totalCount}
+        
+        {/* Hide pagination controls when performing a global search */}
+        {!serverSearchResults && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px", background: "#0d1117", borderTop: "1px solid #1f2937" }}>
+            <div style={{ color: "#9ca3af", fontSize: 13 }}>
+              Showing {skip + 1} to {Math.min(skip + limit, totalCount)} of {totalCount}
+            </div>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button 
+                onClick={() => { setSkip(skip - limit); onRefresh(); }} 
+                disabled={skip === 0}
+                style={{ padding: "8px 16px", borderRadius: 8, background: skip === 0 ? "#1f2937" : "#374151", color: skip === 0 ? "#6b7280" : "#f9fafb", border: "none", cursor: skip === 0 ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13 }}
+              >
+                ← Previous
+              </button>
+              <button 
+                onClick={() => { setSkip(skip + limit); onRefresh(); }} 
+                disabled={(skip + limit) >= totalCount}
+                style={{ padding: "8px 16px", borderRadius: 8, background: (skip + limit) >= totalCount ? "#1f2937" : "#3b82f6", color: (skip + limit) >= totalCount ? "#6b7280" : "#fff", border: "none", cursor: (skip + limit) >= totalCount ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13 }}
+              >
+                Next →
+              </button>
+            </div>
           </div>
-          <div style={{ display: "flex", gap: "10px" }}>
-            <button 
-              onClick={() => {
-                setSkip(skip - limit);
-                onRefresh(); 
-              }} 
-              disabled={skip === 0}
-              style={{ padding: "8px 16px", borderRadius: 8, background: skip === 0 ? "#1f2937" : "#374151", color: skip === 0 ? "#6b7280" : "#f9fafb", border: "none", cursor: skip === 0 ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13 }}
-            >
-              ← Previous
-            </button>
-            <button 
-              onClick={() => {
-                setSkip(skip + limit);
-                onRefresh();
-              }} 
-              disabled={(skip + limit) >= totalCount}
-              style={{ padding: "8px 16px", borderRadius: 8, background: (skip + limit) >= totalCount ? "#1f2937" : "#3b82f6", color: (skip + limit) >= totalCount ? "#6b7280" : "#fff", border: "none", cursor: (skip + limit) >= totalCount ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13 }}
-            >
-              Next →
-            </button>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
 }
 
-function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) {
+function CampaignsPage({ campaigns, recipients, groups, onRefresh: parentRefresh, showToast }) {
   const [reportData, setReportData] = useState(null);
   const [reportCampaignId, setReportCampaignId] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -506,11 +528,22 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
 
   const [reportSearch, setReportSearch] = useState("");
 
-  const { data: fetchedCampaigns, isLoading, refresh } = useApiCache('campaigns', async () => {
-        const response = await api.get('/campaigns/'); 
-        return response.data;
-  });
+  // 1. Wrap the fetcher in useCallback so it doesn't cause infinite React loops
+  const fetchCampaigns = useCallback(async () => {
+      const response = await api.get('/campaigns/'); 
+      return response.data;
+  }, []);
 
+  // 2. Extract the new 'isRefreshing' variable
+  const { data: fetchedCampaigns, isLoading, isRefreshing, refresh } = useApiCache('campaigns', fetchCampaigns);
+
+  // 3. THE MAGIC INTERCEPTOR:
+  // Whenever the app tries to refresh (like after creating a campaign), 
+  // force the local cache to update, AND tell the parent to update.
+  const onRefresh = () => {
+      refresh();
+      if (parentRefresh) parentRefresh();
+  };
 
   const formatDate = (dateString) => {
     if (!dateString) return "Not sent yet";
@@ -520,9 +553,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     });
   };
 
-  // Cache-busted fetch — the report GET was being served stale (showing days-old
-  // data) because the response sat in an HTTP cache. The ?_t param + the backend
-  // no-store headers guarantee a fresh pull every time.
   const loadReport = async (id, { silent = false } = {}) => {
     if (!silent) setReportLoading(true);
     try {
@@ -542,10 +572,8 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     }
   };
 
-  // Clean up the report timer if the component unmounts with it open.
   useEffect(() => stopReportPolling, []);
 
-  // Load content-revision history whenever the campaign detail modal opens.
   useEffect(() => {
     if (!viewCampaign) { setCampaignRevisions([]); setOpenRevId(null); return; }
     let cancelled = false;
@@ -563,7 +591,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   const viewReport = async (id) => {
     setReportCampaignId(id);
     await loadReport(id);
-    // Keep the open report live as opens/clicks trickle in.
     stopReportPolling();
     reportPollRef.current = setInterval(() => loadReport(id, { silent: true }), 15000);
   };
@@ -573,8 +600,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     setReportData(null);
     setReportCampaignId(null);
   };
-
-  
 
   const deleteCampaign = async (id) => {
     if (!window.confirm("Are you sure you want to delete this campaign?")) return;
@@ -592,11 +617,10 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     }
   };
 
-  // Clean up the polling timer if the component unmounts mid-send.
   useEffect(() => stopPolling, []);
 
   if (isLoading) return <div style={{ color: "#fff", padding: "20px" }}>Loading Campaigns...</div>;
-  // 2. Safely combine them: use the freshly fetched data, or fallback to the prop
+  
   const currentCampaigns = fetchedCampaigns || campaigns || [];
 
   const sortedCampaigns = [...currentCampaigns].sort((a, b) => {
@@ -609,14 +633,13 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
     try {
       const s = await api(`/campaigns/${campaignId}/queue-status`);
       setSendProgress(s);
-      // Done when nothing is left pending or actively sending.
       if (s.total === 0 || (s.pending + s.sending) === 0) {
         stopPolling();
         setSending(false);
         onRefresh();
       }
     } catch (e) {
-      // Ignore transient errors while polling; keep the last known progress.
+      // Ignore transient errors while polling
     }
   };
 
@@ -640,7 +663,6 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
         body: JSON.stringify({ recipient_ids: selRecs, group_ids: selGroups, personalize: useAIPersonalization, sender_name: sendSenderName })
       });
       showToast(`Queued ${res.queued ?? 0} recipient(s) for sending`);
-      // Switch the modal into live-progress mode, then poll queue-status.
       setSendProgress({
         total: (res.queued ?? 0) + (res.already_queued ?? 0),
         pending: res.queued ?? 0,
@@ -690,14 +712,29 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
   };
 
   return (
-    
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb" }}>Campaigns</h1>
         <div style={{ display: "flex", gap: "10px" }}>
-          <button onClick={refresh} style={{ background: "#374151", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
-            ⟳ Refresh
+          
+          {/* UPDATED REFRESH BUTTON UI */}
+          <button 
+              onClick={refresh} 
+              disabled={isRefreshing}
+              style={{ 
+                  background: isRefreshing ? "#1f2937" : "#374151", 
+                  color: isRefreshing ? "#9ca3af" : "#fff", 
+                  border: "none", 
+                  padding: "10px 20px", 
+                  borderRadius: 8, 
+                  cursor: isRefreshing ? "wait" : "pointer", 
+                  fontWeight: "bold",
+                  transition: "all 0.2s"
+              }}
+          >
+              {isRefreshing ? "↻ Refreshing..." : "⟳ Refresh"}
           </button>
+          
           <button onClick={() => setNewCampModal(true)} style={{ background: "#3b82f6", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
             + New Campaign
           </button>
@@ -817,7 +854,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
                 <th style={{ padding: "8px 0" }}>Clicks</th>
               </tr>
             </thead>
-            {/* The new search bar */}
+            
             <input 
                 type="text" 
                 placeholder="🔍 Search recipient..." 
@@ -857,7 +894,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
                     <>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
                         <span style={{ color: "#d1d5db", fontSize: 14, fontWeight: 600 }}>{done ? "✅ Completed" : "📤 Sending…"}</span>
-                        <span style={{ color: "#f9fafb", fontSize: 20, fontWeight: 700, fontFamily: "'Space Grotesk', monospace" }}>{fmt(pctVal)}%</span>
+                        <span style={{ color: "#f9fafb", fontSize: 20, fontWeight: 700, fontFamily: "'Space Grotesk', monospace" }}>{pctVal}%</span>
                       </div>
                       <div style={{ height: 12, background: "#0d1117", borderRadius: 999, overflow: "hidden", border: "1px solid #1f2937" }}>
                         <div style={{ width: `${Math.min(100, pctVal)}%`, height: "100%", background: done ? "#22c55e" : "#3b82f6", transition: "width 0.4s ease" }} />
@@ -950,8 +987,8 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh, showToast }) 
             </div>
             <div style={{ textAlign: "right", marginRight: 20, minWidth: 120 }}>
               <div style={{ fontSize: 13, color: "#d1d5db", fontWeight: "bold" }}>Sent: {c.total_sent || 0}</div>
-              <div style={{ fontSize: 12, color: "#4ade80" }}>Open Rate: {pct(c.open_rate)}</div>
-              <div style={{ fontSize: 12, color: "#a78bfa" }}>Click Rate: {pct(c.click_rate)}</div>
+              <div style={{ fontSize: 12, color: "#4ade80" }}>Open Rate: {c.open_rate ? `${(c.open_rate * 100).toFixed(1)}%` : "0.0%"}</div>
+              <div style={{ fontSize: 12, color: "#a78bfa" }}>Click Rate: {c.click_rate ? `${(c.click_rate * 100).toFixed(1)}%` : "0.0%"}</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => { setViewCampaign(c); setIsEditing(false); setEditedContent(c.body_html); }} style={{ background: "transparent", color: "#60a5fa", border: "1px solid #1e3a8a", borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontWeight: "bold" }}>🔍 Details</button>
