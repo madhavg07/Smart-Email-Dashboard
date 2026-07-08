@@ -85,6 +85,30 @@ export default function SenderAccountManager({ showToast }) {
     setLoading(false);
   };
 
+  // THE MISSING FUNCTION ADDED HERE
+  const toggleSenderStatus = async (sender) => {
+    try {
+      const token = localStorage.getItem("mailpulse_token");
+      const response = await fetch(`${API_BASE}/api/senders/${sender.id}/status`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ is_active: !sender.is_active })
+      });
+
+      if (response.ok) {
+        if (showToast) showToast(`Account marked as ${!sender.is_active ? 'Active' : 'Inactive'}`);
+        fetchAccounts(); // Refresh the list to show the new status
+      } else {
+        if (showToast) showToast("Failed to update status", "error");
+      }
+    } catch (error) {
+      if (showToast) showToast("Network error occurred", "error");
+    }
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
@@ -159,13 +183,13 @@ export default function SenderAccountManager({ showToast }) {
         </div>
       ) : (
         <div style={{ display: "grid", gap: 12 }}>
-          {accounts.map((acc, index) => (
-            <div key={index} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20 }}>
+          {accounts.map((sender, index) => (
+            <div key={index} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20, opacity: sender.is_active ? 1 : 0.5 }}>
               <div style={{ flex: 1 }}>
-                <span style={{ fontWeight: 600, color: "#f9fafb", fontSize: 16 }}>{acc.email_address}</span>
+                <span style={{ fontWeight: 600, color: "#f9fafb", fontSize: 16 }}>{sender.email_address}</span>
                 <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 4 }}>
-                  <span style={{ background: "#374151", padding: "2px 8px", borderRadius: 4, marginRight: 8 }}>{acc.provider}</span>
-                  Daily Limit: {acc.daily_limit}
+                  <span style={{ background: "#374151", padding: "2px 8px", borderRadius: 4, marginRight: 8 }}>{sender.provider}</span>
+                  Daily Limit: {sender.daily_limit}
                 </div>
               </div>
               <button 
@@ -176,8 +200,8 @@ export default function SenderAccountManager({ showToast }) {
                     cursor: "pointer", 
                     fontWeight: "bold",
                     border: "none",
-                    background: sender.is_active ? "#065f46" : "#7f1d1d", // Dark Green / Dark Red
-                    color: sender.is_active ? "#34d399" : "#fca5a5"       // Light Green / Light Red
+                    background: sender.is_active ? "#065f46" : "#7f1d1d",
+                    color: sender.is_active ? "#34d399" : "#fca5a5" 
                 }}
             >
                 {sender.is_active ? "🟢 Active" : "🔴 Inactive"}
