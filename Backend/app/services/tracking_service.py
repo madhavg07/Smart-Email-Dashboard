@@ -20,25 +20,30 @@ async def log_pixel_hit(token: str, request: Request):
         if not send_log:
             return
 
-        user_agent = request.headers.get("user-agent", "")
+        # 1. FORCE LOWERCASE: This stops GoogleImageProxy from slipping through
+        raw_user_agent = request.headers.get("user-agent", "")
+        user_agent = raw_user_agent.lower()
 
-        if is_security_bot(user_agent):
+        # 2. Block standard crawler bots instantly
+        if is_security_bot(raw_user_agent): 
             return
-        
+
+        # 3. Calculate exactly how many seconds ago the email was dispatched
         time_since_sent = (datetime.utcnow() - send_log.sent_at).total_seconds()
         
-        # If Apple or Google hits the pixel in under 60 seconds, it's a pre-fetch bot.
+        # 4. THE 5-MINUTE PROXY TRAP
         is_proxy = "googleimageproxy" in user_agent or "apple" in user_agent
-        if is_proxy and time_since_sent < 60:
-            logger.info(f"Blocked instant ghost open for {send_log.recipient_id}")
-            return # Ignore it completely!
+        if is_proxy and time_since_sent < 30: # 30 seconds = 0.5 minutes
+            logger.info(f"Blocked early proxy ghost open for {send_log.recipient_id}")
+            return
 
+        # --- If it survives the trap, log it as a legitimate open ---
         open_event = OpenEvent(
             send_log_id=send_log.id,
             recipient_id=send_log.recipient_id,
             campaign_id=send_log.campaign_id,
             ip_address=request.client.host if request.client else "",
-            user_agent=user_agent,
+            user_agent=raw_user_agent, # Save original capitalization for the DB
             opened_at=datetime.utcnow(),
         )
         db.add(open_event)
@@ -58,7 +63,8 @@ async def log_pixel_hit(token: str, request: Request):
             pass
 
         db.commit()
-    except Exception:
+    except Exception as e:
+        logger.error(f"Pixel tracking error: {str(e)}")
         db.rollback()
     finally:
         db.close()
