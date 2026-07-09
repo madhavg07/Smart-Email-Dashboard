@@ -8,35 +8,42 @@ from sqlalchemy.orm import Session
 import csv
 import io
 import re
-from typing import Optional
+from typing import List,Optional
 
-from app.models.database import SendLog, get_db, Recipient, Group, OpenEvent, ClickEvent, User
+from app.models.database import SessionLocal, SendLog, get_db, Recipient, Group, OpenEvent, ClickEvent, User
 from app.services.auth_services import get_current_user
-from sqlalchemy import or_
+from sqlalchemy import or_, desc
 from app.services.email_verifier import verify_bulk
 router = APIRouter()
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 class RecipientCreate(BaseModel):
     email: str
-    name: str | None = None
-    role: str | None = None
-    industry: str | None = None
-    company: str | None = None
-    group_ids: list[str] | None = []
-    new_group_name: str | None = None
+    name: Optional[str] = ""
+    role: Optional[str] = ""
+    industry: Optional[str] = ""
+    company: Optional[str] = ""
+    group_ids: Optional[List[int]] = []
+    new_group_name: Optional[str] = None
 
+# --- 1. GLOBALLY SORTED GET ROUTE ---
 @router.get("/")
 def list_recipients(
     skip: int = Query(0, description="How many records to skip"),
     limit: int = Query(100, le=500, description="How many records to return (max 500)"),
-    search: Optional[str] = Query(None, description="Search term for email or name"), # 1. Added Search Param
+    search: Optional[str] = Query(None, description="Search term for email or name"),
+    sort_by: Optional[str] = Query("default", description="opens, clicks, or default"),
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    # 2. Create the base query (do not execute it yet!)
     query = db.query(Recipient).filter(Recipient.user_id == current_user.id)
     
-    # 3. If a search term was passed, dynamically add the filter to the query
+    # Apply Global Search
     if search:
         search_term = f"%{search}%"
         query = query.filter(
@@ -46,11 +53,16 @@ def list_recipients(
             )
         )
         
-    # 4. Get the total count of the matched rows (so frontend knows if there are more pages)
+    # Apply Global Sort
+    if sort_by == "opens":
+        query = query.order_by(desc(Recipient.total_opens).nulls_last(), desc(Recipient.id))
+    elif sort_by == "clicks":
+        query = query.order_by(desc(Recipient.total_clicks).nulls_last(), desc(Recipient.id))
+    else:
+        query = query.order_by(desc(Recipient.id))
+        
     total_count = query.count()
-    
-    # 5. Fetch ONLY the requested chunk using .offset() and .limit(), ordered newest first
-    recipients = query.order_by(Recipient.id.desc()).offset(skip).limit(limit).all()
+    recipients = query.offset(skip).limit(limit).all()
         
     return {
         "total": total_count,
@@ -58,16 +70,18 @@ def list_recipients(
         "data": recipients
     }
 
+# --- 2. VERIFIED POST ROUTE ---
 @router.post("/")
 def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     
+    # 1. Parse all pasted emails
     raw_emails = [e.strip().lower() for e in re.split(r'[\s,]+', payload.email) if e.strip()]
     unique_emails_to_add = list(set(raw_emails)) 
 
     if not unique_emails_to_add:
         raise HTTPException(status_code=400, detail="No valid emails provided.")
 
-    # 2. BULK DUPLICATE CHECK
+    # 2. Duplicate Check
     existing_records = db.query(Recipient.email).filter(
         Recipient.user_id == current_user.id,
         Recipient.email.in_(unique_emails_to_add)
@@ -77,33 +91,28 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), curre
     new_emails = [e for e in unique_emails_to_add if e not in existing_emails]
 
     if not new_emails:
-        raise HTTPException(status_code=400, detail="All pasted recipients already exist in your list.")
+        raise HTTPException(status_code=400, detail="All provided emails already exist in your database.")
 
-    # 3. VERIFY NEW EMAILS IN BULK
+    # 3. VERIFY EMAILS (Catch dead domains/invalid formats)
     final_valid_emails = []
-    dropped_invalid = 0
-
+    
     try:
-        # verify_bulk returns a list of dicts: [{"email": "...", "status": "invalid", ...}, ...]
         verification_results = verify_bulk(new_emails)
         verdicts = {r.get("email"): r.get("status") for r in verification_results}
 
         for email in new_emails:
             if verdicts.get(email) == "invalid":
-                dropped_invalid += 1
+                continue # Drop the dead email
             else:
                 final_valid_emails.append(email)
     except Exception as e:
-        # If verification blows up, fail open (allow them all through)
-        final_valid_emails = new_emails
+        final_valid_emails = new_emails # Fail open if verifier crashes
 
     if not final_valid_emails:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Rejected: All {len(new_emails)} new emails provided were invalid or had dead domains."
-        )
+        # This will trigger the Red Toast on the frontend!
+        raise HTTPException(status_code=400, detail="Rejected: Email domain is invalid or does not exist.")
 
-    # 4. GROUP HANDLING
+    # 4. Group Handling & Insert
     final_group_ids = payload.group_ids or []
     if payload.new_group_name:
         existing_group = db.query(Group).filter(Group.name == payload.new_group_name, Group.user_id == current_user.id).first()
@@ -115,15 +124,10 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), curre
         else:
             final_group_ids.append(existing_group.id)
 
-    # 5. BULK INSERT
     new_recipients = [
         Recipient(
-            user_id=current_user.id,
-            email=email,
-            name=payload.name or "",
-            role=payload.role,
-            industry=payload.industry,
-            company=payload.company,
+            user_id=current_user.id, email=email, name=payload.name or "",
+            role=payload.role, industry=payload.industry, company=payload.company,
             metadata_={"group_ids": final_group_ids}
         )
         for email in final_valid_emails
@@ -133,14 +137,7 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), curre
         db.bulk_save_objects(new_recipients)
         db.commit()
     
-    # We raise an HTTP exception if NO emails were added, so the frontend UI stays perfectly in sync
-    return {
-        "status": "success",
-        "message": f"Added {len(new_recipients)} recipients. Skipped {len(existing_emails)} duplicates. Dropped {dropped_invalid} invalid.", 
-        "added_count": len(new_recipients),
-        "skipped_duplicates": len(existing_emails),
-        "dropped_invalid": dropped_invalid
-    }
+    return {"status": "success", "message": f"Added {len(new_recipients)} valid recipients."}
 
 @router.patch("/{recipient_id}/suppress")
 def suppress_recipient(recipient_id: str, suppress: bool = False, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
