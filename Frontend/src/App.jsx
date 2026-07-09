@@ -284,6 +284,7 @@ function RecipientsPage({ groups, showToast, setGlobalLoading }) {
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [uploadGroupId, setUploadGroupId] = useState("");
   const fileInputRef = useRef(null);
+  const [filter, setFilter] = useState("all");
 
   // This hook controls EVERYTHING (Search, Sort, Pagination) automatically
   const fetchRecipients = useCallback(async () => {
@@ -380,6 +381,13 @@ function RecipientsPage({ groups, showToast, setGlobalLoading }) {
       event.target.value = null;
     }
   };
+
+  const processedRecipients = data.filter(r => {
+    if (filter === "suppressed" && !r.is_suppressed) return false;
+    if (filter === "hot" && (r.seriousness_score || 0) < 0.75) return false;
+    if (filter === "active" && r.is_suppressed) return false;
+    return true;
+  });
 
   return (
     <div>
@@ -483,7 +491,7 @@ function RecipientsPage({ groups, showToast, setGlobalLoading }) {
             </tr>
           </thead>
           <tbody>
-            {data.map(r => {
+            {processedRecipients.map(r => {
               const rGroups = (r.metadata_?.group_ids || []).map(id => groups.find(g => g.id === id)?.name).filter(Boolean);
               return (
                 <tr key={r.id} style={{ borderBottom: "1px solid #0f172a", opacity: r.is_suppressed ? 0.5 : 1 }}>
