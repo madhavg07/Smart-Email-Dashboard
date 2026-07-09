@@ -84,7 +84,7 @@ function SettingsPage() {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    api.get('/users/me').then(res => setUser(res.data || res)).catch(() => {});
+    api('/users/me').then(res => setUser(res.data || res)).catch(() => {});
   }, []);
 
   return (
@@ -277,7 +277,7 @@ function RecipientsPage({ recipients, groups, onRefresh, showToast, skip, setSki
     const debounceTimer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const res = await api.get(`/recipients/?search=${encodeURIComponent(searchTerm)}&limit=100`);
+        const res = await api(`/recipients/?search=${encodeURIComponent(searchTerm)}&limit=100`);
         setServerSearchResults(res.data || res);
       } catch (err) {
         console.error("Search failed", err);
@@ -552,7 +552,7 @@ function CampaignsPage({ campaigns, recipients, groups, onRefresh: parentRefresh
   const [reportSearch, setReportSearch] = useState("");
 
   const fetchCampaigns = useCallback(async () => {
-      const response = await api.get('/campaigns/'); 
+      const response = await api('/campaigns/'); 
       return response.data;
   }, []);
 
@@ -1221,11 +1221,11 @@ export default function App() {
     if (!isAuthenticated) return;
     try {
       const [ov, tl, cmp, rcp, grp] = await Promise.all([
-        api.get('/analytics/overview').catch(() => ({})),
-        api.get('/analytics/opens-over-time').catch(() => []),
-        api.get('/campaigns/').catch(() => []),
-        api.get(`/recipients/?skip=${skip}&limit=${limit}`).catch(() => ({ data: [], total: 0 })),
-        api.get('/groups/').catch(() => [])
+        api('/analytics/overview').catch(() => ({})),
+        api('/analytics/opens-over-time').catch(() => []),
+        api('/campaigns/').catch(() => []),
+        api(`/recipients/?skip=${skip}&limit=${limit}`).catch(() => ({ data: [], total: 0 })),
+        api('/groups/').catch(() => [])
       ]);
 
       setOverview(ov.data || ov);
