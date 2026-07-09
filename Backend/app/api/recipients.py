@@ -28,7 +28,7 @@ class RecipientCreate(BaseModel):
     role: Optional[str] = ""
     industry: Optional[str] = ""
     company: Optional[str] = ""
-    group_ids: Optional[List[int]] = []
+    group_ids: Optional[List[str]] = []
     new_group_name: Optional[str] = None
 
 # --- 1. GLOBALLY SORTED GET ROUTE ---

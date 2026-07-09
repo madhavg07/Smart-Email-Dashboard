@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.models.database import get_db, User
-from app.services.auth_services import verify_password, create_access_token, get_password_hash
+from app.services.auth_services import verify_password, create_access_token, get_password_hash,get_current_user
 
 import random
 from datetime import datetime, timedelta
@@ -153,3 +153,12 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
     db.commit()
 
     return {"message": "Password successfully reset!"}
+
+@router.get("/me")
+def get_my_profile(current_user: User = Depends(get_current_user)):
+    """Returns the profile of the currently authenticated user."""
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "created_at": current_user.created_at
+    }

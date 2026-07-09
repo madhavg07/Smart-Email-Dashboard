@@ -73,19 +73,52 @@ function SettingsPage() {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    api('/users/me').then(res => setUser(res.data || res)).catch(() => {});
+    // 1. Instant Fallback: Read ID directly from the local JWT Token
+    let fallbackId = "Unknown";
+    try {
+      const token = localStorage.getItem("mailpulse_token");
+      if (token) {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        fallbackId = payload.sub || payload.id || "Unknown";
+      }
+    } catch(e) {}
+
+    // 2. Fetch full details from the new backend route
+    // Note: If your auth routes use a different prefix, adjust '/auth/me' accordingly
+    api('/auth/me')
+      .then(res => {
+        setUser(res.data || res);
+      })
+      .catch((err) => {
+        console.error("Profile fetch failed:", err);
+        // Fallback so the screen isn't empty if the backend isn't ready
+        setUser({ 
+            id: fallbackId, 
+            email: "Please add the /auth/me backend route", 
+            created_at: new Date() 
+        });
+      });
   }, []);
 
   return (
     <div style={{ maxWidth: 600 }}>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", marginBottom: 20 }}>Account Settings</h1>
       <div style={{ background: "#111827", padding: 24, borderRadius: 12, border: "1px solid #1f2937" }}>
-        <h3 style={{ marginTop: 0, color: "#9ca3af" }}>Profile Details</h3>
+        <h3 style={{ marginTop: 0, color: "#9ca3af", marginBottom: 20 }}>Profile Details</h3>
         {user ? (
-          <div style={{ display: "grid", gap: 15, color: "#d1d5db" }}>
-            <div><strong style={{ color: "#f9fafb" }}>Account ID:</strong> {user.id}</div>
-            <div><strong style={{ color: "#f9fafb" }}>Email Address:</strong> {user.email}</div>
-            <div><strong style={{ color: "#f9fafb" }}>Member Since:</strong> {new Date(user.created_at).toLocaleDateString()}</div>
+          <div style={{ display: "grid", gap: 15, color: "#d1d5db", fontSize: 15 }}>
+            <div style={{ display: "flex", borderBottom: "1px solid #1f2937", paddingBottom: 10 }}>
+                <strong style={{ color: "#9ca3af", width: "140px" }}>Account ID:</strong> 
+                <span style={{ color: "#f9fafb", fontFamily: "monospace" }}>{user.id}</span>
+            </div>
+            <div style={{ display: "flex", borderBottom: "1px solid #1f2937", paddingBottom: 10 }}>
+                <strong style={{ color: "#9ca3af", width: "140px" }}>Email Address:</strong> 
+                <span style={{ color: "#f9fafb" }}>{user.email}</span>
+            </div>
+            <div style={{ display: "flex" }}>
+                <strong style={{ color: "#9ca3af", width: "140px" }}>Member Since:</strong> 
+                <span style={{ color: "#f9fafb" }}>{new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+            </div>
           </div>
         ) : (
           <div style={{ color: "#9ca3af" }}>Loading profile data...</div>
@@ -401,13 +434,45 @@ function RecipientsPage({ groups, showToast, setGlobalLoading }) {
         <button onClick={initiateGroupSelection} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "12px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Choose Groups & Save ➔</button>
       </div>
 
-      <div style={{ display: "flex", gap: 15, marginBottom: 20, flexWrap: "wrap" }}>
-        <input type="text" placeholder={isSearching ? "Searching 33k+ database..." : "🔍 Search entire database..."} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: "10px", borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", flex: 1, minWidth: "200px", opacity: isSearching ? 0.7 : 1 }} />
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ padding: "10px", borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }}>
-            <option value="default">Default Sort (Newest)</option>
-            <option value="opens">🔥 Most Opens Globally</option>
-            <option value="clicks">🖱️ Most Clicks Globally</option>
-        </select>
+      <div style={{ background: "#111827", padding: "16px", borderRadius: "12px", border: "1px solid #1f2937", marginBottom: 20 }}>
+        
+        {/* Row 1: The Tab Filters (Hot, Active, Suppressed) */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+          <span style={{ color: "#9ca3af", fontSize: 14, fontWeight: "bold", alignSelf: "center", marginRight: 10 }}>Filter By:</span>
+          {["all", "hot", "active", "suppressed"].map(f => (
+            <button 
+              key={f} 
+              onClick={() => setFilter(f)} 
+              style={{ 
+                padding: "8px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer", fontWeight: 600, 
+                background: filter === f ? "#3b82f6" : "#1f2937", 
+                color: filter === f ? "#fff" : "#d1d5db", 
+                border: filter === f ? "1px solid #60a5fa" : "1px solid #374151" 
+              }}>
+              {f === "hot" ? "🔥 Hot" : f === "active" ? "🟢 Active" : f === "suppressed" ? "🔴 Suppressed" : "All Recipients"}
+            </button>
+          ))}
+        </div>
+
+        {/* Row 2: Search and Sort */}
+        <div style={{ display: "flex", gap: 15, flexWrap: "wrap" }}>
+          <input 
+              type="text" 
+              placeholder={isSearching ? "Searching 33k+ database..." : "🔍 Search entire database..."} 
+              value={searchTerm} 
+              onChange={(e) => setSearchTerm(e.target.value)} 
+              style={{ padding: "10px", borderRadius: 8, border: "1px solid #374151", background: "#0d1117", color: "#fff", flex: 1, minWidth: "200px", opacity: isSearching ? 0.7 : 1 }} 
+          />
+          <select 
+              value={sortBy} 
+              onChange={(e) => setSortBy(e.target.value)} 
+              style={{ padding: "10px", borderRadius: 8, border: "1px solid #374151", background: "#0d1117", color: "#fff", fontWeight: "bold" }}
+          >
+              <option value="default">Default Sort (Newest)</option>
+              <option value="opens">🔥 Most Opens Globally</option>
+              <option value="clicks">🖱️ Most Clicks Globally</option>
+          </select>
+        </div>
       </div>
 
       <div style={{ background: "#111827", borderRadius: 12, border: "1px solid #1f2937", overflowX: "auto" }}>
@@ -867,8 +932,177 @@ function CampaignsPage({ campaigns, groups, recipients, onRefresh: parentRefresh
 }
 
 function UnifiedAIFlowPage({ showToast, onRefresh, setGlobalLoading }) {
-  // (Keep your existing Unified AI Flow exactly as it is in your codebase, it's perfect)
-  return <div style={{padding: 20}}>AI Writer Component Active</div>;
+  const [campaignName, setCampaignName] = useState("");
+  const [baseForm, setBaseForm] = useState({ subject: "", body: "", name: "", role: "", company: "", industry: "" });
+  const [personalized, setPersonalized] = useState(null);
+  const [variants, setVariants] = useState([]);
+  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [hoveredVariant, setHoveredVariant] = useState(null);
+  const [spamScore, setSpamScore] = useState(null);
+  const [aiScore, setAiScore] = useState(null);
+  const [isScoring, setIsScoring] = useState(false);
+
+  const analyzeSubjectLine = async (text) => {
+    if (!text) { setAiScore(null); return; }
+    setIsScoring(true);
+    try {
+      const ROOT_URL = API_URL.replace(/\/api\/?$/, "");
+      const response = await fetch(`${ROOT_URL}/analyze-subject`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subject: text }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const res = await response.json();
+      setAiScore({ score: res.score, is_optimal: (res.score ?? 0) >= 7, feedback: res.feedback });
+    } catch (e) {
+      console.error("Failed to score subject line:", e);
+      setAiScore(null);
+    } finally {
+      setIsScoring(false);
+    }
+  };
+
+  const runPersonalization = async () => {
+    if (setGlobalLoading) setGlobalLoading(true);
+    try {
+      const res = await api("/ai/personalize", { method: "POST", body: JSON.stringify({ subject: baseForm.subject, body: baseForm.body, recipient_name: baseForm.name, recipient_role: baseForm.role, recipient_industry: baseForm.industry, recipient_company: baseForm.company }) });
+      setPersonalized(res);
+      showToast("Personalization generated!");
+    } catch (e) { showToast(e.message, "error"); }
+    finally { if (setGlobalLoading) setGlobalLoading(false); }
+  };
+
+  const runABVariants = async () => {
+    if (setGlobalLoading) setGlobalLoading(true);
+    try {
+      const targetSubj = personalized ? personalized.subject : baseForm.subject;
+      const targetBody = personalized ? personalized.body : baseForm.body;
+      const res = await api("/ai/ab-variants", { method: "POST", body: JSON.stringify({ subject: targetSubj, body: targetBody, num_variants: 3 }) });
+      setVariants(res.variants);
+      showToast("Variants generated!");
+    } catch (e) { showToast(e.message, "error"); }
+    finally { if (setGlobalLoading) setGlobalLoading(false); }
+  };
+
+  const runSpamCheck = async (variant) => {
+    setSelectedVariant(variant);
+    if (setGlobalLoading) setGlobalLoading(true);
+    try {
+      const res = await api("/ai/spam-check", { method: "POST", body: JSON.stringify({ subject: variant.subject, body: variant.body }) });
+      setSpamScore(res);
+    } catch (e) { showToast(e.message, "error"); }
+    finally { if (setGlobalLoading) setGlobalLoading(false); }
+  };
+
+  const saveToDrafts = async (includeABTest = false) => {
+    if (!campaignName) return showToast("Please provide a Campaign Name at the top first", "error");
+    if (setGlobalLoading) setGlobalLoading(true);
+    try {
+      const payload = {
+        name: campaignName,
+        subject: personalized ? personalized.subject : baseForm.subject,
+        body_html: personalized ? personalized.body : baseForm.body,
+        is_ab_test: includeABTest && selectedVariant !== null,
+        subject_b: (includeABTest && selectedVariant) ? selectedVariant.subject : null,
+        body_html_b: (includeABTest && selectedVariant) ? selectedVariant.body : null
+      };
+
+      await api("/campaigns/", { method: "POST", body: JSON.stringify(payload) });
+      showToast("Saved to Drafts successfully!");
+      onRefresh();
+      
+      setBaseForm({ subject: "", body: "", name: "", role: "", company: "", industry: "" });
+      setPersonalized(null);
+      setVariants([]);
+      setSelectedVariant(null);
+      setSpamScore(null);
+      setCampaignName("");
+      setAiScore(null); 
+    } catch (e) { showToast(e.message, "error"); }
+    finally { if (setGlobalLoading) setGlobalLoading(false); }
+  };
+
+  const sectionStyle = (isActive) => ({
+    background: "#111827", borderRadius: 12, padding: 24,
+    border: isActive ? "1px solid #3b82f6" : "1px solid #1f2937",
+    opacity: isActive ? 1 : 0.4,
+    pointerEvents: isActive ? "auto" : "none",
+    transition: "all 0.3s",
+    marginBottom: 16
+  });
+
+  const inputStyle = { width: "100%", padding: "10px", borderRadius: 8, background: "#0d1117", border: "1px solid #1f2937", color: "#f9fafb", marginBottom: 12, boxSizing: "border-box" };
+
+  return (
+    <div style={{ maxWidth: 800 }}>
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", marginBottom: 6 }}>Unified AI Composer</h1>
+      <input style={{ ...inputStyle, fontSize: 16, fontWeight: 'bold', borderColor: "#3b82f6", marginBottom: 20 }} placeholder="Name this Campaign (e.g., Q3 Outreach) - Required to Save" value={campaignName} onChange={e => setCampaignName(e.target.value)} />
+
+      <div style={sectionStyle(true)}>
+        <h3 style={{ marginTop: 0, color: "#60a5fa" }}>1. Base Context</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+          <input style={inputStyle} placeholder="Target Persona Name" value={baseForm.name} onChange={e => setBaseForm({ ...baseForm, name: e.target.value })} />
+          <input style={inputStyle} placeholder="Role (e.g., CEO)" value={baseForm.role} onChange={e => setBaseForm({ ...baseForm, role: e.target.value })} />
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#9ca3af", marginLeft: 2 }}>Base Subject</label>
+            {isScoring ? <span style={{ fontSize: 12, color: "#60a5fa" }}>Analyzing... 🧠</span> : aiScore ? (
+              <span style={{ fontSize: 11, fontWeight: "bold", padding: "2px 8px", borderRadius: 12, background: aiScore.is_optimal ? "#166534" : "#991b1b", color: "#fff" }}>
+                {aiScore.is_optimal ? "🔥 Great Subject" : "⚠️ Low Engagement"} ({aiScore.score}/10)
+              </span>
+            ) : null}
+          </div>
+          <input style={{ ...inputStyle, marginBottom: 0, border: aiScore ? (aiScore.is_optimal ? "1px solid #22c55e" : "1px solid #ef4444") : "1px solid #1f2937" }} placeholder="Enter an engaging subject line..." value={baseForm.subject} onChange={e => setBaseForm({ ...baseForm, subject: e.target.value })} onBlur={() => analyzeSubjectLine(baseForm.subject)} />
+          {aiScore && !aiScore.is_optimal && <div style={{ fontSize: 11, color: "#f87171", marginTop: 6, marginLeft: 2 }}>Try adding a sense of urgency, a question, or an actionable hook to increase open rates.</div>}
+        </div>
+        <textarea style={{ ...inputStyle, minHeight: 100 }} placeholder="Paste raw text here..." value={baseForm.body} onChange={e => setBaseForm({ ...baseForm, body: e.target.value })} />
+        <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+          <button onClick={runPersonalization} disabled={!baseForm.subject || !baseForm.body} style={{ background: "#1d4ed8", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>Personalize Context</button>
+        </div>
+      </div>
+
+      <div style={sectionStyle(personalized !== null)}>
+        <h3 style={{ marginTop: 0, color: "#60a5fa" }}>2. AI Personalized Output</h3>
+        <div style={{ color: "#d1d5db", fontSize: 14, marginBottom: 8 }}><strong>Subject:</strong> {personalized?.subject}</div>
+        <div style={{ background: "#ffffff", color: "#000", padding: 15, borderRadius: 8, border: "1px solid #d1d5db" }} dangerouslySetInnerHTML={{ __html: personalized?.body }} />
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 16 }}>
+          <button onClick={() => saveToDrafts(false)} style={{ background: "#10b981", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>💾 Save to Drafts (Skip A/B)</button>
+          <button onClick={runABVariants} style={{ background: "#374151", color: "#fff", padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold" }}>Generate A/B Test Variants ➔</button>
+        </div>
+      </div>
+
+      <div style={sectionStyle(variants.length > 0)}>
+        <h3 style={{ marginTop: 0, color: "#60a5fa" }}>3. Select a Variant to Analyze & Review Formats</h3>
+        <p style={{ fontSize: 12, color: "#9ca3af" }}>Click a variant below to see the HTML formatted output and run a spam check.</p>
+        <div style={{ display: "grid", gap: 12 }}>
+          {variants.map((v, i) => (
+            <div key={i} onMouseEnter={() => setHoveredVariant(i)} onMouseLeave={() => setHoveredVariant(null)} onClick={() => runSpamCheck(v)} style={{ background: selectedVariant === v ? "#1e3a8a" : hoveredVariant === i ? "#1f2937" : "#0d1117", padding: 16, borderRadius: 8, border: selectedVariant === v ? "1px solid #60a5fa" : "1px solid #374151", cursor: "pointer", transition: "all 0.2s" }}>
+              <div style={{ color: "#60a5fa", fontSize: 12, fontWeight: "bold" }}>{v.angle}</div>
+              <div style={{ color: "#f9fafb", fontWeight: 600 }}>{v.subject}</div>
+              <div style={{ color: "#6b7280", fontSize: 12, marginBottom: selectedVariant === v ? 12 : 0 }}>{v.rationale}</div>
+              {selectedVariant === v && (
+                <div style={{ borderTop: "1px solid #3b82f6", paddingTop: 12, marginTop: 8 }}>
+                   <div style={{ color: "#9ca3af", fontSize: 11, marginBottom: 4, textTransform: "uppercase" }}>Formatting Preview:</div>
+                   <div style={{ background: "#ffffff", color: "#000", padding: 12, borderRadius: 6, fontSize: 13 }} dangerouslySetInnerHTML={{ __html: v.body }} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={sectionStyle(spamScore !== null)}>
+        <h3 style={{ marginTop: 0, color: "#22c55e" }}>4. Final Review & Save</h3>
+        <div style={{ fontSize: 18, color: spamScore?.score > 5 ? "#f87171" : "#4ade80", marginBottom: 12 }}>Spam Score: {spamScore?.score}/10</div>
+        {spamScore?.issues?.length > 0 && (
+          <ul style={{ color: "#fca5a5", fontSize: 13, marginBottom: 16 }}>
+             {spamScore.issues.map((issue, idx) => <li key={idx}>{issue}</li>)}
+          </ul>
+        )}
+        <button onClick={() => saveToDrafts(true)} style={{ background: "#22c55e", color: "#fff", padding: "12px 24px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: "bold", width: "100%" }}>💾 Save Complete A/B Test Campaign</button>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {

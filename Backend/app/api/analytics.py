@@ -47,77 +47,34 @@ def opens_over_time(db: Session = Depends(get_db), current_user: User = Depends(
     now = datetime.utcnow()
     thirty_days_ago = now - timedelta(days=30)
     
-    # 1. Initialize data map to track BOTH opens and clicks for every day
     data_map = {}
     for i in range(31):
         dt = (thirty_days_ago + timedelta(days=i)).strftime("%Y-%m-%d")
         data_map[dt] = {"opens": 0, "clicks": 0}
 
-    # ----------------------------------------------------
-    # 2. CALCULATE OPENS (Your original logic)
-    # ----------------------------------------------------
-    events = db.query(OpenEvent).join(SendLog).join(Campaign).filter(
-        Campaign.user_id == current_user.id,
-        OpenEvent.opened_at >= thirty_days_ago
+    # Fetch ALL logs for the user's campaigns
+    logs = db.query(SendLog).join(Campaign).filter(
+        Campaign.user_id == current_user.id
     ).all()
     
-    if events:
-        for e in events:
-            if e.opened_at:
-                dt = e.opened_at.strftime("%Y-%m-%d")
-                if dt in data_map:
-                    data_map[dt]["opens"] += 1
-    else:
-        logs = db.query(SendLog).join(Campaign).filter(
-            Campaign.user_id == current_user.id,
-            SendLog.first_opened_at >= thirty_days_ago
-        ).all()
-        for log in logs:
-            if log.first_opened_at:
-                dt = log.first_opened_at.strftime("%Y-%m-%d")
-                if dt in data_map:
-                    data_map[dt]["opens"] += (log.open_count or 0)
+    for log in logs:
+        # 1. Track Unique Opens (Max 1 per recipient)
+        if log.first_opened_at and log.first_opened_at >= thirty_days_ago:
+            dt_open = log.first_opened_at.strftime("%Y-%m-%d")
+            if dt_open in data_map:
+                data_map[dt_open]["opens"] += 1
+                
+        # 2. Track Unique Clicks (Neutralizes the Bot Storm)
+        first_click = getattr(log, 'first_clicked_at', None)
+        if first_click and first_click >= thirty_days_ago:
+            dt_click = first_click.strftime("%Y-%m-%d")
+            if dt_click in data_map:
+                data_map[dt_click]["clicks"] += 1
+        elif getattr(log, 'click_count', 0) > 0 and log.sent_at and log.sent_at >= thirty_days_ago:
+            # Fallback: if you only track raw count, assign the unique click to the sent date
+            dt_click = log.sent_at.strftime("%Y-%m-%d")
+            if dt_click in data_map:
+                data_map[dt_click]["clicks"] += 1
 
-
-    # ----------------------------------------------------
-    # 3. CALCULATE CLICKS (New Logic)
-    # ----------------------------------------------------
-    try:
-        from app.models.database import ClickEvent
-        click_events = db.query(ClickEvent).join(SendLog).join(Campaign).filter(
-            Campaign.user_id == current_user.id,
-            ClickEvent.clicked_at >= thirty_days_ago
-        ).all()
-        
-        if click_events:
-            for c in click_events:
-                if c.clicked_at:
-                    dt = c.clicked_at.strftime("%Y-%m-%d")
-                    if dt in data_map:
-                        data_map[dt]["clicks"] += 1
-        else:
-            raise Exception("Fallback to SendLog") # Force the fallback if table is empty
-            
-    except Exception:
-        # Fallback: If you don't use a separate ClickEvent table, read from SendLog
-        logs = db.query(SendLog).join(Campaign).filter(
-            Campaign.user_id == current_user.id,
-            SendLog.click_count > 0
-        ).all()
-        
-        for log in logs:
-            # Try to grab the click date, fallback to open date, fallback to sent date
-            dt_obj = getattr(log, 'first_clicked_at', None) or getattr(log, 'first_opened_at', None) or log.sent_at
-            
-            if dt_obj and dt_obj >= thirty_days_ago:
-                dt = dt_obj.strftime("%Y-%m-%d")
-                if dt in data_map:
-                    data_map[dt]["clicks"] += (log.click_count or 0)
-
-    # 4. Format into the exact Array structure Recharts expects
-    timeline = [
-        {"date": k, "opens": v["opens"], "clicks": v["clicks"]} 
-        for k, v in data_map.items()
-    ]
-    
+    timeline = [{"date": k, "opens": v["opens"], "clicks": v["clicks"]} for k, v in data_map.items()]
     return {"timeline": timeline}

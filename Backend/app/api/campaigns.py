@@ -57,12 +57,14 @@ class SendRequest(BaseModel):
     sender_name: Optional[str] = None
 
 @router.post("/{campaign_id}/send")
+@router.post("/{campaign_id}/send")
 async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    final_recipient_ids = set()
+    # 1. Gather all requested Recipient IDs
+    raw_ids = set()
     personalize = True
     sender_name = None
 
@@ -70,8 +72,7 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
         personalize = payload.personalize
         sender_name = payload.sender_name
         if payload.recipient_ids:
-            for rid in payload.recipient_ids:
-                final_recipient_ids.add(rid)
+            raw_ids.update(payload.recipient_ids)
         
         if payload.group_ids:
             all_recs = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.is_suppressed == False).all()
@@ -79,19 +80,28 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
                 meta = r.metadata_ or {}
                 r_groups = meta.get("group_ids", [])
                 if any(gid in r_groups for gid in payload.group_ids):
-                    final_recipient_ids.add(r.id)
+                    raw_ids.add(r.id)
                     
         if not payload.recipient_ids and not payload.group_ids:
             all_recs = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.is_suppressed == False).all()
-            for r in all_recs:
-                final_recipient_ids.add(r.id)
+            raw_ids.update(r.id for r in all_recs)
     else:
         all_recs = db.query(Recipient).filter(Recipient.user_id == current_user.id, Recipient.is_suppressed == False).all()
-        for r in all_recs:
-            final_recipient_ids.add(r.id)
+        raw_ids.update(r.id for r in all_recs)
 
-    target_ids = list(final_recipient_ids)
+    # 2. DEDUPLICATE BY EMAIL ADDRESS
+    # Even if the DB has 10 different IDs for "john@gmail.com", we only queue ONE email.
+    recipients = db.query(Recipient).filter(Recipient.id.in_(raw_ids)).all()
+    seen_emails = set()
+    target_ids = []
+    
+    for r in recipients:
+        email_lower = r.email.strip().lower()
+        if email_lower not in seen_emails:
+            seen_emails.add(email_lower)
+            target_ids.append(r.id)
 
+    # 3. Queue the Campaign
     try:
         already = {
             r[0] for r in db.query(SendQueue.recipient_id)
@@ -119,8 +129,7 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
         campaign.status = "sending"
         db.commit()
         
-        # Pass personalize + sender_name through, otherwise the custom "From"
-        # name and the AI-personalization toggle are silently dropped.
+        # 4. Trigger Celery Task using the deduplicated list
         process_campaign_queue.delay(campaign_id, target_ids, personalize, sender_name)
 
     except Exception as e:
