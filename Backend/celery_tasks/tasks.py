@@ -401,3 +401,4 @@ def process_bulk_import(self, user_id: str, contacts_data: list, group_ids: list
         logger.error("Bulk import failed: %s", e)
     finally:
         db.close()
+        

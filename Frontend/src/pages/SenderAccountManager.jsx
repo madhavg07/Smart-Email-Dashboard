@@ -15,13 +15,12 @@ const decodeJWT = (token) => {
   }
 };
 
-export default function SenderAccountManager({ showToast }) {
+export default function SenderAccountManager({ showToast, setGlobalLoading }) {
   const [emailAddress, setEmailAddress] = useState("");
   const [appPassword, setAppPassword] = useState("");
   const [provider, setProvider] = useState("SMTP (Gmail/Outlook)");
   const [dailyLimit, setDailyLimit] = useState(400);
   const [accounts, setAccounts] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
@@ -47,7 +46,7 @@ export default function SenderAccountManager({ showToast }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    if (setGlobalLoading) setGlobalLoading(true);
     try {
       const token = localStorage.getItem("mailpulse_token");
       const decoded = decodeJWT(token);
@@ -81,12 +80,13 @@ export default function SenderAccountManager({ showToast }) {
       }
     } catch (error) {
       if (showToast) showToast("Network error occurred", "error");
+    } finally {
+      if (setGlobalLoading) setGlobalLoading(false);
     }
-    setLoading(false);
   };
 
-  // THE MISSING FUNCTION ADDED HERE
   const toggleSenderStatus = async (sender) => {
+    if (setGlobalLoading) setGlobalLoading(true);
     try {
       const token = localStorage.getItem("mailpulse_token");
       const response = await fetch(`${API_BASE}/api/senders/${sender.id}/status`, {
@@ -100,18 +100,20 @@ export default function SenderAccountManager({ showToast }) {
 
       if (response.ok) {
         if (showToast) showToast(`Account marked as ${!sender.is_active ? 'Active' : 'Inactive'}`);
-        fetchAccounts(); // Refresh the list to show the new status
+        fetchAccounts(); 
       } else {
         if (showToast) showToast("Failed to update status", "error");
       }
     } catch (error) {
       if (showToast) showToast("Network error occurred", "error");
+    } finally {
+      if (setGlobalLoading) setGlobalLoading(false);
     }
   };
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "10px" }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f9fafb", margin: 0 }}>Sender Accounts</h1>
           <p style={{ color: "#9ca3af", marginTop: 4, fontSize: 14 }}>Manage rotating email identities to bypass sending limits.</p>
@@ -125,8 +127,8 @@ export default function SenderAccountManager({ showToast }) {
       </div>
 
       {isModalOpen && (
-        <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-          <div style={{ background: "#1f2937", padding: 24, borderRadius: 12, width: "100%", maxWidth: 500, border: "1px solid #374151" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20, boxSizing: "border-box" }}>
+          <div style={{ background: "#1f2937", padding: 24, borderRadius: 12, width: "100%", maxWidth: 500, border: "1px solid #374151", boxSizing: "border-box" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <h3 style={{ margin: 0, color: "#f9fafb", fontSize: 20, fontWeight: "bold" }}>Add New Sender</h3>
               <button onClick={() => setIsModalOpen(false)} style={{ background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer", fontSize: 18 }}>✕</button>
@@ -137,7 +139,7 @@ export default function SenderAccountManager({ showToast }) {
                 placeholder="Email Address"
                 value={emailAddress}
                 onChange={(e) => setEmailAddress(e.target.value)}
-                style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }}
+                style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", boxSizing: "border-box" }}
                 required
               />
               <input
@@ -145,13 +147,13 @@ export default function SenderAccountManager({ showToast }) {
                 placeholder="App Password / API Key"
                 value={appPassword}
                 onChange={(e) => setAppPassword(e.target.value)}
-                style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }}
+                style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", boxSizing: "border-box" }}
                 required
               />
               <select
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
-                style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }}
+                style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", boxSizing: "border-box" }}
               >
                 <option>SMTP (Gmail/Outlook)</option>
                 <option>SendGrid</option>
@@ -162,15 +164,14 @@ export default function SenderAccountManager({ showToast }) {
                 placeholder="Daily Limit (e.g. 400)"
                 value={dailyLimit}
                 onChange={(e) => setDailyLimit(e.target.value)}
-                style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff" }}
+                style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", boxSizing: "border-box" }}
                 required
               />
               <button
                 type="submit"
-                disabled={loading}
-                style={{ width: "100%", background: "#10b981", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: loading ? "not-allowed" : "pointer", fontWeight: "bold", marginTop: 10 }}
+                style={{ width: "100%", background: "#10b981", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: "pointer", fontWeight: "bold", marginTop: 10 }}
               >
-                {loading ? "Adding..." : "Save Account"}
+                Save Account
               </button>
             </form>
           </div>
@@ -184,8 +185,8 @@ export default function SenderAccountManager({ showToast }) {
       ) : (
         <div style={{ display: "grid", gap: 12 }}>
           {accounts.map((sender, index) => (
-            <div key={index} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20, opacity: sender.is_active ? 1 : 0.5 }}>
-              <div style={{ flex: 1 }}>
+            <div key={index} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20, opacity: sender.is_active ? 1 : 0.5, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: "200px" }}>
                 <span style={{ fontWeight: 600, color: "#f9fafb", fontSize: 16 }}>{sender.email_address}</span>
                 <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 4 }}>
                   <span style={{ background: "#374151", padding: "2px 8px", borderRadius: 4, marginRight: 8 }}>{sender.provider}</span>

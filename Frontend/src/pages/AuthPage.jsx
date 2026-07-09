@@ -107,8 +107,8 @@ function AuthPage({ onLogin }) {
   };
 
   return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", background: "#0d1117" }}>
-      <div style={{ background: "#111827", padding: "40px", borderRadius: "12px", border: "1px solid #1f2937", width: "100%", maxWidth: "400px", boxShadow: "0 10px 25px rgba(0,0,0,0.5)" }}>
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", background: "#0d1117", padding: "20px" }}>
+      <div style={{ background: "#111827", padding: "40px", borderRadius: "12px", border: "1px solid #1f2937", width: "100%", maxWidth: "400px", boxShadow: "0 10px 25px rgba(0,0,0,0.5)", boxSizing: "border-box" }}>
         
         <h2 style={{ color: "#f9fafb", textAlign: "center", marginBottom: "30px", fontSize: "24px" }}>
           {mode === 'login' && "Welcome Back"}
