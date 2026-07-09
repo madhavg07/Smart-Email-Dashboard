@@ -12,9 +12,11 @@ from typing import List,Optional
 
 from app.models.database import SessionLocal, SendLog, get_db, Recipient, Group, OpenEvent, ClickEvent, User
 from app.services.auth_services import get_current_user
-from sqlalchemy import or_, desc
+from sqlalchemy import or_, desc, cast, String
 from app.services.email_verifier import verify_bulk
+
 router = APIRouter()
+
 def get_db():
     db = SessionLocal()
     try:
@@ -28,22 +30,33 @@ class RecipientCreate(BaseModel):
     role: Optional[str] = ""
     industry: Optional[str] = ""
     company: Optional[str] = ""
-    group_ids: Optional[List[str]] = []
+    group_ids: Optional[List[str]] = [] 
     new_group_name: Optional[str] = None
 
-# --- 1. GLOBALLY SORTED GET ROUTE ---
 @router.get("/")
 def list_recipients(
     skip: int = Query(0, description="How many records to skip"),
     limit: int = Query(100, le=500, description="How many records to return (max 500)"),
     search: Optional[str] = Query(None, description="Search term for email or name"),
     sort_by: Optional[str] = Query("default", description="opens, clicks, or default"),
+    filter_by: Optional[str] = Query("all", description="all, hot, active, suppressed"), # NEW TABS FILTER
+    group_id: Optional[str] = Query(None, description="Filter by a specific group ID"),
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
     query = db.query(Recipient).filter(Recipient.user_id == current_user.id)
     
-    # Apply Global Search
+    if group_id:
+        query = query.filter(cast(Recipient.metadata_, String).ilike(f'%{group_id}%'))
+        
+    # GLOBAL TABS FILTERING
+    if filter_by == "suppressed":
+        query = query.filter(Recipient.is_suppressed == True)
+    elif filter_by == "active":
+        query = query.filter(Recipient.is_suppressed == False)
+    elif filter_by == "hot":
+        query = query.filter(Recipient.seriousness_score >= 0.75)
+        
     if search:
         search_term = f"%{search}%"
         query = query.filter(
@@ -53,7 +66,6 @@ def list_recipients(
             )
         )
         
-    # Apply Global Sort
     if sort_by == "opens":
         query = query.order_by(desc(Recipient.total_opens).nulls_last(), desc(Recipient.id))
     elif sort_by == "clicks":
@@ -70,18 +82,14 @@ def list_recipients(
         "data": recipients
     }
 
-# --- 2. VERIFIED POST ROUTE ---
 @router.post("/")
 def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    
-    # 1. Parse all pasted emails
     raw_emails = [e.strip().lower() for e in re.split(r'[\s,]+', payload.email) if e.strip()]
     unique_emails_to_add = list(set(raw_emails)) 
 
     if not unique_emails_to_add:
         raise HTTPException(status_code=400, detail="No valid emails provided.")
 
-    # 2. Duplicate Check
     existing_records = db.query(Recipient.email).filter(
         Recipient.user_id == current_user.id,
         Recipient.email.in_(unique_emails_to_add)
@@ -93,26 +101,26 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), curre
     if not new_emails:
         raise HTTPException(status_code=400, detail="All provided emails already exist in your database.")
 
-    # 3. VERIFY EMAILS (Catch dead domains/invalid formats)
     final_valid_emails = []
     
     try:
         verification_results = verify_bulk(new_emails)
-        verdicts = {r.get("email"): r.get("status") for r in verification_results}
+        # PERFECT MATCH: Using identical mapping logic from your CSV code
+        verdicts = {(r.get("email") or "").strip().lower(): r.get("status") for r in verification_results}
 
         for email in new_emails:
             if verdicts.get(email) == "invalid":
-                continue # Drop the dead email
+                continue 
             else:
                 final_valid_emails.append(email)
+                
     except Exception as e:
-        final_valid_emails = new_emails # Fail open if verifier crashes
+        print(f"VERIFICATION CRASHED: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Verifier Error: {str(e)}")
 
     if not final_valid_emails:
-        # This will trigger the Red Toast on the frontend!
         raise HTTPException(status_code=400, detail="Rejected: Email domain is invalid or does not exist.")
 
-    # 4. Group Handling & Insert
     final_group_ids = payload.group_ids or []
     if payload.new_group_name:
         existing_group = db.query(Group).filter(Group.name == payload.new_group_name, Group.user_id == current_user.id).first()
@@ -120,9 +128,9 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), curre
             new_group = Group(name=payload.new_group_name, description="Auto-created", user_id=current_user.id)
             db.add(new_group)
             db.flush()
-            final_group_ids.append(new_group.id)
+            final_group_ids.append(str(new_group.id))
         else:
-            final_group_ids.append(existing_group.id)
+            final_group_ids.append(str(existing_group.id))
 
     new_recipients = [
         Recipient(
