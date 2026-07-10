@@ -739,6 +739,22 @@ function CampaignsPage({ campaigns, groups, recipients, onRefresh: parentRefresh
     });
   };
 
+  // --- NEW: PAUSE / RESUME / CANCEL LOGIC ---
+  const handleStatusChange = async (campaignId, action) => {
+    if (action === 'cancel' && !window.confirm("Are you sure you want to permanently cancel this campaign? The remaining queue will be dropped.")) return;
+    
+    if (setGlobalLoading) setGlobalLoading(true);
+    try {
+      await api(`/campaigns/${campaignId}/${action}`, { method: "PATCH" });
+      showToast(`Campaign ${action}ed successfully!`);
+      onRefresh(); // Refresh the list to show the new status and buttons
+    } catch (e) {
+      showToast(e.message || `Failed to ${action} campaign`, "error");
+    } finally {
+      if (setGlobalLoading) setGlobalLoading(false);
+    }
+  };
+
   const loadReport = async (id, { silent = false } = {}) => {
     if (!silent) setReportLoading(true);
     try {
@@ -906,6 +922,9 @@ function CampaignsPage({ campaigns, groups, recipients, onRefresh: parentRefresh
         </div>
       </div>
 
+      {/* ... (Keep your existing Modals exactly the same: newCampModal, viewCampaign, reportData, sendModal) ... */}
+      
+      {/* ADDING MODALS HERE FOR COMPLETENESS SO COPY-PASTE WORKS */}
       {newCampModal && (
         <ModalOverlay title="Create New Campaign" onClose={() => setNewCampModal(false)}>
           <input placeholder="Campaign Name (e.g. Q3 Newsletter)" value={newCampName} onChange={e => setNewCampName(e.target.value)} style={{ width: "100%", padding: 12, marginBottom: 15, borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", boxSizing: "border-box" }} />
@@ -1050,29 +1069,61 @@ function CampaignsPage({ campaigns, groups, recipients, onRefresh: parentRefresh
         </ModalOverlay>
       )}
 
+      {/* --- THE UPDATED CAMPAIGN LIST UI --- */}
       <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
         {sortedCampaigns.map(c => (
           <div key={c.id} style={{ background: "#111827", borderRadius: 12, padding: "18px 24px", border: "1px solid #1f2937", display: "flex", alignItems: "center", flexWrap: "wrap", gap: 20 }}>
+            
             <div style={{ flex: 1, minWidth: "250px" }}>
-              <span style={{ fontWeight: 600, color: "#f9fafb", fontSize: 16 }}>{c.name}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontWeight: 600, color: "#f9fafb", fontSize: 16 }}>{c.name}</span>
+                {/* Visual Status Indicator */}
+                {c.status === "sending" && <span style={{ background: "#064e3b", color: "#34d399", fontSize: 11, padding: "2px 8px", borderRadius: 12, fontWeight: "bold" }}>Sending</span>}
+                {c.status === "paused" && <span style={{ background: "#78350f", color: "#fbbf24", fontSize: 11, padding: "2px 8px", borderRadius: 12, fontWeight: "bold" }}>Paused</span>}
+                {c.status === "cancelled" && <span style={{ background: "#7f1d1d", color: "#fca5a5", fontSize: 11, padding: "2px 8px", borderRadius: 12, fontWeight: "bold" }}>Cancelled</span>}
+                {c.status === "completed" && <span style={{ background: "#1e3a8a", color: "#60a5fa", fontSize: 11, padding: "2px 8px", borderRadius: 12, fontWeight: "bold" }}>Completed</span>}
+              </div>
               <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 4 }}>
                 {c.is_ab_test ? <span style={{ color: "#60a5fa", marginRight: 8, fontSize: 11, background: "#1e3a8a", padding: "2px 6px", borderRadius: 4 }}>A/B Test</span> : null}
                 {c.subject}
               </div>
             </div>
+
             <div style={{ textAlign: "right", marginRight: 20, minWidth: 120 }}>
               <div style={{ fontSize: 13, color: "#d1d5db", fontWeight: "bold" }}>Sent: {c.total_sent || 0}</div>
-              {/* RATES FIXED: No longer multiplying by 100 */}
               <div style={{ fontSize: 12, color: "#4ade80" }}>Open Rate: {c.open_rate ? `${Number(c.open_rate || 0).toFixed(1)}%` : "0.0%"}</div>
               <div style={{ fontSize: 12, color: "#a78bfa" }}>Click Rate: {c.click_rate ? `${Number(c.click_rate || 0).toFixed(1)}%` : "0.0%"}</div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <button onClick={() => { setViewCampaign(c); setIsEditing(false); setEditedContent(c.body_html); }} style={{ background: "transparent", color: "#60a5fa", border: "1px solid #1e3a8a", borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontWeight: "bold" }}>🔍 Details</button>
-              {['sending', 'sent', 'paused', 'completed'].includes(c.status) ? (
+              
+              {/* Dynamic Action Buttons based on Status */}
+              {['sending', 'sent', 'paused', 'completed', 'cancelled'].includes(c.status) && (
                 <button onClick={() => viewReport(c.id)} style={{ background: "#374151", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>📊 Report</button>
-              ) : (
+              )}
+
+              {/* Show Pause/Cancel if Sending */}
+              {c.status === 'sending' && (
+                <>
+                  <button onClick={() => handleStatusChange(c.id, 'pause')} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>⏸️ Pause</button>
+                  <button onClick={() => handleStatusChange(c.id, 'cancel')} style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>⏹️ Cancel</button>
+                </>
+              )}
+
+              {/* Show Resume/Cancel if Paused */}
+              {c.status === 'paused' && (
+                <>
+                  <button onClick={() => handleStatusChange(c.id, 'resume')} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>▶️ Resume</button>
+                  <button onClick={() => handleStatusChange(c.id, 'cancel')} style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>⏹️ Cancel</button>
+                </>
+              )}
+
+              {/* Show Send Now if it hasn't been queued yet */}
+              {!['sending', 'sent', 'paused', 'completed', 'cancelled'].includes(c.status) && (
                 <button onClick={() => { setSelRecs([]); setSelGroups([]); setSendProgress(null); setSendModal(c.id); }} style={{ background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: "bold" }}>Send Now ▶</button>
               )}
+              
               <button onClick={() => deleteCampaign(c.id)} style={{ background: "transparent", color: "#f87171", border: "1px solid #7f1d1d", borderRadius: 8, padding: "8px 12px", cursor: "pointer" }}>🗑️</button>
             </div>
           </div>

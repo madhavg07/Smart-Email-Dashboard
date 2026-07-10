@@ -57,7 +57,6 @@ class SendRequest(BaseModel):
     sender_name: Optional[str] = None
 
 @router.post("/{campaign_id}/send")
-@router.post("/{campaign_id}/send")
 async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     campaign = db.query(Campaign).filter(Campaign.id == campaign_id, Campaign.user_id == current_user.id).first()
     if not campaign:
@@ -273,3 +272,36 @@ def update_campaign(campaign_id: str, payload: CampaignUpdate, db: Session = Dep
     campaign.body_html = payload.body_html
     db.commit()
     return {"message": "Updated"}
+
+
+@router.patch("/{campaign_id}/pause")
+def pause_campaign(id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    campaign = db.query(Campaign).filter(Campaign.id == id, Campaign.user_id == current_user.id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    
+    if campaign.status == "sending":
+        campaign.status = "paused"
+        db.commit()
+    return {"message": "Campaign paused. Emails will sleep."}
+
+@router.patch("/{campaign_id}/resume")
+def resume_campaign(id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    campaign = db.query(Campaign).filter(Campaign.id == id, Campaign.user_id == current_user.id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    
+    if campaign.status == "paused":
+        campaign.status = "sending"
+        db.commit()
+    return {"message": "Campaign resumed. Emails will continue sending."}
+
+@router.patch("/{campaign_id}/cancel")
+def cancel_campaign(id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    campaign = db.query(Campaign).filter(Campaign.id == id, Campaign.user_id == current_user.id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    
+    campaign.status = "cancelled"
+    db.commit()
+    return {"message": "Campaign cancelled. Remaining queue dropped."}

@@ -9,6 +9,7 @@ import logging
 import ssl
 import smtplib
 import random
+import json
 from email.message import EmailMessage
 from celery import Celery
 from datetime import datetime, timedelta
@@ -135,10 +136,23 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
     import uuid
     from datetime import datetime
     import asyncio
+    
 
     db = SessionLocal()
     try:
         campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+
+        # 1. HANDLE CANCELLED CAMPAIGNS
+        if not campaign or campaign.status == "cancelled":
+            logger.info(f"Campaign {campaign_id} cancelled. Dropping email to {recipient_id}.")
+            return # Instantly kills the task
+
+        # 2. HANDLE PAUSED CAMPAIGNS
+        if campaign.status == "paused":
+            logger.info(f"Campaign {campaign_id} is paused. Sleeping task for 5 minutes.")
+            # Put the task back to sleep in Redis for 300 seconds, then try again
+            raise self.retry(countdown=300)
+        
         recipient = db.query(Recipient).filter(Recipient.id == recipient_id).first()
         sender = db.query(SenderAccount).filter(SenderAccount.id == sender_id).first()
 
@@ -287,7 +301,7 @@ celery_app.conf.beat_schedule = {
         'task': 'celery_tasks.tasks.auto_suppress_inactive_students',
         'schedule': crontab(hour=18, minute=30), 
     },
-    # Task 2: Runs every Sunday at midnight UTC to keep the ML model fresh
+    # Task 2: Retrains XGBoost Suppression Model
     'weekly-model-retraining': {
         'task': 'celery_tasks.tasks.auto_retrain_suppression_model',
         'schedule': crontab(hour=0, minute=0, day_of_week='sunday'),
@@ -296,6 +310,11 @@ celery_app.conf.beat_schedule = {
     'auto-optimize-low-engagement': {
         'task': 'celery_tasks.tasks.auto_optimize_campaigns_task',
         'schedule': crontab(minute=0, hour='*/6'),
+    },
+    # NEW TASK 4: Weekly ML Recalibration (Scores, Bot Storms, AI Prompts)
+    'weekly-ml-recalibration': {
+        'task': 'celery_tasks.tasks.weekly_ml_recalibration',
+        'schedule': crontab(hour=2, minute=0, day_of_week='sunday'), # Runs 2:00 AM Sunday
     },
 }
 
@@ -401,4 +420,97 @@ def process_bulk_import(self, user_id: str, contacts_data: list, group_ids: list
         logger.error("Bulk import failed: %s", e)
     finally:
         db.close()
+
+# Path to store AI learning data
+AI_MEMORY_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ai_winning_trends.json"))
+
+@celery_app.task(bind=True)
+def weekly_ml_recalibration(self):
+    from app.models.database import SessionLocal, Recipient, Campaign, SendLog
+    
+    logger.info("🧠 Starting Weekly ML Recalibration...")
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        seven_days_ago = now - timedelta(days=7)
+
+        # ---------------------------------------------------------
+        # 1. RECIPIENT SERIOUSNESS SCORING (Hot / Warm / Cold)
+        # ---------------------------------------------------------
+        logger.info("Recalculating Recipient Scores...")
+        recipients = db.query(Recipient).all()
         
+        for r in recipients:
+            sent = getattr(r, 'total_emails_received', 0) or 0
+            opens = getattr(r, 'total_opens', 0) or 0
+            clicks = getattr(r, 'total_clicks', 0) or 0
+            
+            if sent == 0:
+                r.seriousness_score = 0.1  # Cold/Inactive default
+                continue
+                
+            # Clicks are weighted 2x heavier than opens
+            raw_score = (opens + (clicks * 2)) / sent
+            
+            # Normalize to a max of 1.0
+            final_score = min(1.0, max(0.0, raw_score))
+            r.seriousness_score = final_score
+            
+        db.commit()
+        logger.info("✅ Scores updated.")
+
+        # ---------------------------------------------------------
+        # 2. BOT STORM & FIREWALL DETECTION
+        # ---------------------------------------------------------
+        logger.info("Scanning for Corporate Bot Storms...")
+        suspicious_logs = db.query(SendLog).filter(
+            SendLog.sent_at >= seven_days_ago,
+            SendLog.first_clicked_at != None
+        ).all()
+
+        bot_domains = set()
+        for log in suspicious_logs:
+            if log.sent_at and log.first_clicked_at:
+                time_diff = (log.first_clicked_at - log.sent_at).total_seconds()
+                if time_diff < 15: # If clicked within 15 seconds, it's a bot
+                    recipient = db.query(Recipient).filter(Recipient.id == log.recipient_id).first()
+                    if recipient:
+                        domain = recipient.email.split('@')[-1].lower()
+                        bot_domains.add(domain)
+
+        # For V1, we log these domains so you can monitor them. 
+        # Later, you can add them to a 'BlockedDomains' DB table.
+        logger.info(f"✅ Found {len(bot_domains)} aggressive firewall domains: {list(bot_domains)}")
+
+        # ---------------------------------------------------------
+        # 3. AI TREND EXTRACTION (A/B Test Winners)
+        # ---------------------------------------------------------
+        logger.info("Extracting Subject Line trends for AI Prompts...")
+        recent_campaigns = db.query(Campaign).filter(
+            Campaign.created_at >= seven_days_ago,
+            Campaign.is_ab_test == True
+        ).all()
+
+        winning_subjects = []
+        for camp in recent_campaigns:
+            winning_subjects.append(camp.subject)
+            if camp.subject_b:
+                winning_subjects.append(camp.subject_b)
+
+        # Save the trends to a file that your Smart Compose AI route can read
+        ai_memory = {
+            "last_updated": now.isoformat(),
+            "winning_hooks_last_7_days": list(set(winning_subjects))[:10] # Top 10 unique hooks
+        }
+        
+        with open(AI_MEMORY_FILE, 'w') as f:
+            json.dump(ai_memory, f)
+            
+        logger.info("✅ AI Memory updated.")
+
+    except Exception as e:
+        logger.error(f"❌ ML Recalibration Failed: {str(e)}")
+        db.rollback()
+    finally:
+        db.close()
+        logger.info("🏁 Weekly ML Loop Complete.")
