@@ -84,12 +84,14 @@ def list_recipients(
 
 @router.post("/")
 def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # 1. Parse emails
     raw_emails = [e.strip().lower() for e in re.split(r'[\s,]+', payload.email) if e.strip()]
     unique_emails_to_add = list(set(raw_emails)) 
 
     if not unique_emails_to_add:
         raise HTTPException(status_code=400, detail="No valid emails provided.")
 
+    # 2. Duplicate Check
     existing_records = db.query(Recipient.email).filter(
         Recipient.user_id == current_user.id,
         Recipient.email.in_(unique_emails_to_add)
@@ -101,26 +103,37 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), curre
     if not new_emails:
         raise HTTPException(status_code=400, detail="All provided emails already exist in your database.")
 
+    # 3. STRICT DIAGNOSTIC VERIFICATION
     final_valid_emails = []
     
     try:
         verification_results = verify_bulk(new_emails)
-        # PERFECT MATCH: Using identical mapping logic from your CSV code
-        verdicts = {(r.get("email") or "").strip().lower(): r.get("status") for r in verification_results}
+        # Map the results so we can grab the exact reason string
+        verdicts = {(r.get("email") or "").strip().lower(): r for r in verification_results}
 
         for email in new_emails:
-            if verdicts.get(email) == "invalid":
-                continue 
+            result = verdicts.get(email, {})
+            status = result.get("status")
+            reason = result.get("reason", "Unknown error")
+
+            # STRICT ENFORCEMENT:
+            if status == "invalid":
+                # Drops completely dead emails (e.g. 550 Mailbox Not Found)
+                raise HTTPException(status_code=400, detail=f"Rejected: '{email}' is dead. Reason: {reason}")
+                
+            elif status == "unknown":
+                # This will instantly show you if Port 25 is timing out on your web server
+                raise HTTPException(status_code=400, detail=f"Could not verify '{email}'. Reason: {reason}. (Your Web Server might be blocking Port 25)")
+                
             else:
                 final_valid_emails.append(email)
                 
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"VERIFICATION CRASHED: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Verifier Error: {str(e)}")
 
-    if not final_valid_emails:
-        raise HTTPException(status_code=400, detail="Rejected: Email domain is invalid or does not exist.")
-
+    # 4. Group Handling & Insert
     final_group_ids = payload.group_ids or []
     if payload.new_group_name:
         existing_group = db.query(Group).filter(Group.name == payload.new_group_name, Group.user_id == current_user.id).first()
