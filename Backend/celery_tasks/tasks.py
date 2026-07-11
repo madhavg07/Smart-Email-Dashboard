@@ -108,7 +108,7 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
             target_wakeup = tomorrow.replace(hour=original_start.hour, minute=original_start.minute, second=0, microsecond=0)
             seconds_until_wakeup = int((target_wakeup - now).total_seconds())
             
-            self.retry(
+            raise self.retry(
                 args=[campaign_id, remaining, personalize, sender_name], 
                 countdown=max(seconds_until_wakeup, 60) # Wake up tomorrow, or at least 60s
             )
