@@ -687,7 +687,14 @@ function UnifiedAIFlowPage({ showToast, onRefresh, setGlobalLoading }) {
   );
 }
 
-function CampaignsPage({ campaigns, groups, recipients, onRefresh: parentRefresh, showToast, setGlobalLoading }) {
+function CampaignsPage({ 
+  campaigns = [], 
+  groups = [], 
+  recipients = [], 
+  onRefresh: parentRefresh, 
+  showToast, 
+  setGlobalLoading 
+}) {
   const [reportData, setReportData] = useState(null);
   const [reportCampaignId, setReportCampaignId] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
