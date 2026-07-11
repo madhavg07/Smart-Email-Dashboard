@@ -118,7 +118,15 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
     except Exception as e:
         db.rollback()
         # This catches REAL bugs (typos, DB disconnects), not Retries
-        raise self.retry(exc=e, countdown=60)
+        remaining_recipients = recipient_ids[processed_count:] if 'processed_count' in locals() else recipient_ids
+        
+        # 2. Only trigger a retry if there are actually people left to process
+        if remaining_recipients:
+            raise self.retry(
+                args=[campaign_id, remaining_recipients, personalize, sender_name], 
+                exc=e, 
+                countdown=60
+            )
     finally:
         db.close()
 

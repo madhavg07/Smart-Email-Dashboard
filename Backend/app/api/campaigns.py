@@ -275,7 +275,7 @@ def update_campaign(campaign_id: str, payload: CampaignUpdate, db: Session = Dep
 
 
 @router.patch("/{campaign_id}/pause")
-def pause_campaign(id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def pause_campaign(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     campaign = db.query(Campaign).filter(Campaign.id == id, Campaign.user_id == current_user.id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -286,7 +286,7 @@ def pause_campaign(id: str, db: Session = Depends(get_db), current_user: User = 
     return {"message": "Campaign paused. Emails will sleep."}
 
 @router.patch("/{campaign_id}/resume")
-def resume_campaign(id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def resume_campaign(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     campaign = db.query(Campaign).filter(Campaign.id == id, Campaign.user_id == current_user.id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -297,7 +297,7 @@ def resume_campaign(id: str, db: Session = Depends(get_db), current_user: User =
     return {"message": "Campaign resumed. Emails will continue sending."}
 
 @router.patch("/{campaign_id}/cancel")
-def cancel_campaign(id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def cancel_campaign(campaign_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     campaign = db.query(Campaign).filter(Campaign.id == id, Campaign.user_id == current_user.id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
