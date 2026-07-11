@@ -15,6 +15,7 @@ from celery import Celery
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from celery.schedules import crontab
+from celery.exceptions import Retry
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -51,76 +52,75 @@ celery_app.conf.update(
 def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personalize: bool = True, sender_name: str = None):
     from app.models.database import SessionLocal, Campaign
     from app.services.rotation_service import get_available_sender
-    import random
-
+    
     db = SessionLocal()
     try:
         campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
-        if not campaign:
+        
+        # 1. Stop if campaign doesn't exist or is cancelled
+        if not campaign or campaign.status == "cancelled":
+            return 
+
+        # 2. Stop if paused (don't retry, just exit and let the frontend resume it)
+        if campaign.status == "paused":
             return
 
         campaign.status = "sending"
         db.commit()
 
         delay_trackers = {}
-        unprocessed_recipients = []
+        processed_count = 0
 
         for idx, rid in enumerate(recipient_ids):
-            sender = get_available_sender(db, campaign.user_id)
-
-            if not sender:
-                unprocessed_recipients = recipient_ids[idx:]
+            # Re-check status inside loop in case user cancels mid-process
+            db.refresh(campaign)
+            if campaign.status == "cancelled":
                 break
+
+            sender = get_available_sender(db, campaign.user_id)
+            if not sender:
+                # If no sender, pass the REMAINING list to the retry
+                remaining = recipient_ids[idx:]
+                raise Retry(message="No senders available, retrying later")
 
             if sender.id not in delay_trackers:
                 delay_trackers[sender.id] = 0
 
             jitter = random.randint(60, 120)
             delay_trackers[sender.id] += jitter
-
             sender.sent_today += 1
 
             dispatch_email.apply_async(
                 args=[sender.id, rid, campaign_id, personalize, idx, sender_name],
                 countdown=delay_trackers[sender.id]
             )
+            processed_count += 1
             
         db.commit()
 
-        if unprocessed_recipients:
-            # 1. Get the current time and the campaign's original start time
+    except Retry as e:
+        # If we hit this, it means we need to sleep (no senders or manually triggered retry)
+        # Check if we have unprocessed items to pass to tomorrow
+        if 'remaining' in locals():
             now = datetime.utcnow()
-            original_start = campaign.created_at # Grabs the exact time you clicked "Send" on day 1
-            
-            # 2. Calculate tomorrow's date
+            original_start = campaign.created_at
             tomorrow = now + timedelta(days=1)
-            
-            # 3. Set the target wake-up to tomorrow at the EXACT hour/minute the campaign started
-            target_wakeup = tomorrow.replace(
-                hour=original_start.hour, 
-                minute=original_start.minute, 
-                second=0, 
-                microsecond=0
-            )
-            
-            # 4. Figure out seconds until that time
+            target_wakeup = tomorrow.replace(hour=original_start.hour, minute=original_start.minute, second=0, microsecond=0)
             seconds_until_wakeup = int((target_wakeup - now).total_seconds())
             
-            # 5. Add a tiny bit of randomness (0 to 30 mins) so it isn't robotic
-            randomized_wakeup = seconds_until_wakeup + random.randint(0, 1800)
-
-            # 6. Put it to sleep!
             self.retry(
-                args=[campaign_id, unprocessed_recipients, personalize, sender_name], 
-                countdown=randomized_wakeup
+                args=[campaign_id, remaining, personalize, sender_name], 
+                countdown=max(seconds_until_wakeup, 60) # Wake up tomorrow, or at least 60s
             )
+        else:
+            raise e
 
     except Exception as e:
         db.rollback()
+        # This catches REAL bugs (typos, DB disconnects), not Retries
         raise self.retry(exc=e, countdown=60)
     finally:
         db.close()
-
 
 @celery_app.task(bind=True, max_retries=999)
 def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, personalize: bool, idx: int, sender_name: str = None):

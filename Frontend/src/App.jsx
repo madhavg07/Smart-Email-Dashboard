@@ -1049,7 +1049,10 @@ function CampaignsPage({ campaigns, groups, recipients, onRefresh: parentRefresh
             })()
           ) : (
           <>
+          {/* THE FIXED GRID WITH BOTH COLUMNS */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            
+            {/* COLUMN 1: GROUPS */}
             <div>
               <h4 style={{ color: "#d1d5db", marginTop: 0 }}>Select Groups</h4>
               <div style={{ maxHeight: 200, overflow: "auto", border: "1px solid #1f2937", padding: 12, borderRadius: 8, background: "#0d1117" }}>
@@ -1060,7 +1063,42 @@ function CampaignsPage({ campaigns, groups, recipients, onRefresh: parentRefresh
                 ))}
               </div>
             </div>
+
+            {/* COLUMN 2: INDIVIDUAL RECIPIENTS */}
+            <div>
+              <h4 style={{ color: "#d1d5db", marginTop: 0 }}>Select Individuals</h4>
+              <div style={{ maxHeight: 200, overflow: "auto", border: "1px solid #1f2937", padding: 12, borderRadius: 8, background: "#0d1117" }}>
+                {recipients.map(r => (
+                  <label key={r.id} style={{ display: "block", marginBottom: 8, color: "#9ca3af", fontSize: 13, cursor: "pointer" }}>
+                    <input type="checkbox" checked={selRecs.includes(r.id)} onChange={() => setSelRecs(p => p.includes(r.id) ? p.filter(x => x !== r.id) : [...p, r.id])} style={{ marginRight: 8, accentColor: "#3b82f6" }} /> {r.email}
+                  </label>
+                ))}
+              </div>
+            </div>
+
           </div>
+
+          {/* THE MISSING ADVANCED OPTIONS PANEL */}
+          <div style={{ marginTop: 20, paddingTop: 15, borderTop: "1px solid #1f2937" }}>
+            <h4 style={{ color: "#d1d5db", marginTop: 0, marginBottom: 12 }}>Advanced Sending Options</h4>
+            <input 
+              type="text" 
+              placeholder="Custom Sender Name (Optional, e.g. John from MailPulse)" 
+              value={sendSenderName} 
+              onChange={(e) => setSendSenderName(e.target.value)} 
+              style={{ width: "100%", padding: "10px", marginBottom: "12px", borderRadius: 8, border: "1px solid #374151", background: "#111827", color: "#fff", boxSizing: "border-box" }} 
+            />
+            <label style={{ display: "flex", alignItems: "center", gap: 10, color: "#9ca3af", fontSize: 13, cursor: "pointer" }}>
+              <input 
+                type="checkbox" 
+                checked={useAIPersonalization} 
+                onChange={(e) => setUseAIPersonalization(e.target.checked)} 
+                style={{ accentColor: "#3b82f6", width: 16, height: 16 }} 
+              /> 
+              Run dynamic AI Personalization on dispatch
+            </label>
+          </div>
+
           <button onClick={executeSend} style={{ marginTop: 20, width: "100%", background: "#22c55e", color: "#fff", border: "none", padding: "12px", borderRadius: 8, cursor: "pointer", fontWeight: "bold" }}>
             Confirm & Send Campaign
           </button>
