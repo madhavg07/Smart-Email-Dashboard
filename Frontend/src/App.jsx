@@ -1056,7 +1056,7 @@ function CampaignsPage({ campaigns, groups, recipients, onRefresh: parentRefresh
             <div>
               <h4 style={{ color: "#d1d5db", marginTop: 0 }}>Select Groups</h4>
               <div style={{ maxHeight: 200, overflow: "auto", border: "1px solid #1f2937", padding: 12, borderRadius: 8, background: "#0d1117" }}>
-                {groups.map(g => (
+                {groups?.map(g => (
                   <label key={g.id} style={{ display: "block", marginBottom: 8, color: "#9ca3af", fontSize: 13, cursor: "pointer" }}>
                     <input type="checkbox" checked={selGroups.includes(g.id)} onChange={() => setSelGroups(p => p.includes(g.id) ? p.filter(x => x !== g.id) : [...p, g.id])} style={{ marginRight: 8, accentColor: "#3b82f6" }} /> {g.name}
                   </label>
@@ -1068,7 +1068,7 @@ function CampaignsPage({ campaigns, groups, recipients, onRefresh: parentRefresh
             <div>
               <h4 style={{ color: "#d1d5db", marginTop: 0 }}>Select Individuals</h4>
               <div style={{ maxHeight: 200, overflow: "auto", border: "1px solid #1f2937", padding: 12, borderRadius: 8, background: "#0d1117" }}>
-                {recipients.map(r => (
+                {recipients?.map(r => (
                   <label key={r.id} style={{ display: "block", marginBottom: 8, color: "#9ca3af", fontSize: 13, cursor: "pointer" }}>
                     <input type="checkbox" checked={selRecs.includes(r.id)} onChange={() => setSelRecs(p => p.includes(r.id) ? p.filter(x => x !== r.id) : [...p, r.id])} style={{ marginRight: 8, accentColor: "#3b82f6" }} /> {r.email}
                   </label>
