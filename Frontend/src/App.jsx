@@ -1186,6 +1186,7 @@ export default function App() {
   const [overview, setOverview] = useState({});
   const [campaigns, setCampaigns] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [recipients, setRecipients] = useState([]);
   const [timeline, setTimeline] = useState([]);
   const [toast, setToast] = useState(null);
   const [showSmtpSettings, setShowSmtpSettings] = useState(false);
@@ -1220,17 +1221,19 @@ export default function App() {
   const loadAllData = useCallback(async () => {
     if (!isAuthenticated) return;
     try {
-      const [ov, tl, cmp, grp] = await Promise.all([
+      const [ov, tl, cmp, grp, rec] = await Promise.all([
         api('/analytics/overview').catch(() => ({})),
         api('/analytics/opens-over-time').catch(() => []),
         api('/campaigns/').catch(() => []),
-        api('/groups/').catch(() => [])
+        api('/groups/').catch(() => []),
+        api('/recipients/').catch(() => [])
       ]);
 
       setOverview(ov.data || ov);
       setTimeline(Array.isArray(tl.data || tl) ? (tl.data || tl) : (tl?.timeline || []));
       setCampaigns(Array.isArray(cmp.data || cmp) ? (cmp.data || cmp) : (cmp?.campaigns || []));
       setGroups(Array.isArray(grp.data || grp) ? (grp.data || grp) : (grp?.groups || []));
+      setRecipients(Array.isArray(rec.data || rec) ? (rec.data || rec) : (rec?.recipients || []));
     } catch (e) {
       console.error(e);
     }
@@ -1313,6 +1316,7 @@ export default function App() {
             <CampaignsPage 
               campaigns={campaigns} 
               groups={groups} 
+              recipients={recipients}
               onRefresh={loadAllData} 
               showToast={showToast}
               setGlobalLoading={setGlobalLoading} 

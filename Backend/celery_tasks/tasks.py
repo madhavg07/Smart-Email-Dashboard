@@ -94,6 +94,11 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
             jitter = random.randint(60, 120)
             delay_trackers[sender.id] += jitter
             sender.sent_today += 1
+            sender.last_sent_at = datetime.utcnow()
+
+            if sender.sent_today >= sender.daily_limit:
+                sender.limit_reached_at = datetime.utcnow()
+                sender.last_reset = datetime.utcnow()
 
             dispatch_email.apply_async(
                 args=[sender.id, rid, campaign_id, personalize, idx, sender_name],

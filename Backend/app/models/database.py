@@ -79,6 +79,12 @@ class SenderAccount(Base):
     sent_today = Column(Integer, default=0)
     last_reset = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
+    
+    # --- NEW: Advanced Rolling 24-Hour Limit Tracking ---
+    limit_reached_at = Column(DateTime, nullable=True)
+    last_sent_at = Column(DateTime, nullable=True)
+    # ----------------------------------------------------
+
     # Warmup: brand-new Gmail accounts start at 30/day and ramp up based on age.
     # For already-warmed existing accounts, the migration backdates this ~60 days.
     created_at = Column(DateTime, default=datetime.utcnow)
