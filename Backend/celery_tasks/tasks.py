@@ -57,31 +57,36 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
     try:
         campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
         
-        # 1. Stop if campaign doesn't exist or is cancelled
-        if not campaign or campaign.status == "cancelled":
+        if not campaign or campaign.status in ["cancelled", "paused"]:
             return 
-
-        # 2. Stop if paused (don't retry, just exit and let the frontend resume it)
-        if campaign.status == "paused":
-            return
 
         campaign.status = "sending"
         db.commit()
 
         delay_trackers = {}
-        processed_count = 0
-
+        
         for idx, rid in enumerate(recipient_ids):
-            # Re-check status inside loop in case user cancels mid-process
             db.refresh(campaign)
-            if campaign.status == "cancelled":
+            if campaign.status in ["cancelled", "paused"]:
                 break
 
             sender = get_available_sender(db, campaign.user_id)
+            
+            # OUT OF SENDERS: Sleep until tomorrow
             if not sender:
-                # If no sender, pass the REMAINING list to the retry
+                now = datetime.utcnow()
+                original_start = campaign.created_at
+                tomorrow = now + timedelta(days=1)
+                
+                target_wakeup = tomorrow.replace(hour=original_start.hour, minute=original_start.minute, second=0, microsecond=0)
+                seconds_until_wakeup = int((target_wakeup - now).total_seconds())
+                
+                # Pass ONLY the remaining recipients to avoid giant Redis payloads
                 remaining = recipient_ids[idx:]
-                raise Retry(message="No senders available, retrying later")
+                raise self.retry(
+                    args=[campaign_id, remaining, personalize, sender_name], 
+                    countdown=max(seconds_until_wakeup, 60)
+                )
 
             if sender.id not in delay_trackers:
                 delay_trackers[sender.id] = 0
@@ -94,39 +99,16 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
                 args=[sender.id, rid, campaign_id, personalize, idx, sender_name],
                 countdown=delay_trackers[sender.id]
             )
-            processed_count += 1
             
         db.commit()
 
-    except Retry as e:
-        # If we hit this, it means we need to sleep (no senders or manually triggered retry)
-        # Check if we have unprocessed items to pass to tomorrow
-        if 'remaining' in locals():
-            now = datetime.utcnow()
-            original_start = campaign.created_at
-            tomorrow = now + timedelta(days=1)
-            target_wakeup = tomorrow.replace(hour=original_start.hour, minute=original_start.minute, second=0, microsecond=0)
-            seconds_until_wakeup = int((target_wakeup - now).total_seconds())
-            
-            raise self.retry(
-                args=[campaign_id, remaining, personalize, sender_name], 
-                countdown=max(seconds_until_wakeup, 60) # Wake up tomorrow, or at least 60s
-            )
-        else:
-            raise e
-
+    except Retry:
+        # Intentionally let Celery sleep
+        raise
     except Exception as e:
         db.rollback()
-        # This catches REAL bugs (typos, DB disconnects), not Retries
-        remaining_recipients = recipient_ids[processed_count:] if 'processed_count' in locals() else recipient_ids
-        
-        # 2. Only trigger a retry if there are actually people left to process
-        if remaining_recipients:
-            raise self.retry(
-                args=[campaign_id, remaining_recipients, personalize, sender_name], 
-                exc=e, 
-                countdown=60
-            )
+        # General crashes (DB disconnect, etc.) retry entirely in 60 seconds
+        raise self.retry(exc=e, countdown=60)
     finally:
         db.close()
 
