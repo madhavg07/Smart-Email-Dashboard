@@ -10,6 +10,10 @@ load_dotenv()
 _raw_db = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mailpulse")
 DATABASE_URL = _raw_db.strip().strip('"').strip("'")
 
+# 🚨 THE DIALECT PATCH: Automatically fix the Aiven string 🚨
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 if "sqlite" in DATABASE_URL.lower():
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
@@ -30,6 +34,7 @@ else:
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
 def get_db():
     db = SessionLocal()
     try:
