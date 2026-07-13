@@ -121,9 +121,9 @@ def add_recipient(payload: RecipientCreate, db: Session = Depends(get_db), curre
                 # Drops completely dead emails (e.g. 550 Mailbox Not Found)
                 raise HTTPException(status_code=400, detail=f"Rejected: '{email}' is dead. Reason: {reason}")
                 
-            elif status == "unknown":
-                # This will instantly show you if Port 25 is timing out on your web server
-                raise HTTPException(status_code=400, detail=f"Could not verify '{email}'. Reason: {reason}. (Your Web Server might be blocking Port 25)")
+            # elif status == "unknown":
+            #     # This will instantly show you if Port 25 is timing out on your web server
+            #     raise HTTPException(status_code=400, detail=f"Could not verify '{email}'. Reason: {reason}. (Your Web Server might be blocking Port 25)")
                 
             else:
                 final_valid_emails.append(email)
