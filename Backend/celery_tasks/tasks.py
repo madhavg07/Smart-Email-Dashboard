@@ -231,6 +231,16 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
 
         db.commit()
 
+    except smtplib.SMTPRecipientsRefused as e:
+        # 🚨 IMMEDIATE BOUNCE DETECTED: The receiving server rejected the address
+        recipient = db.query(Recipient).filter(Recipient.id == recipient_id).first()
+        if recipient:
+            recipient.is_bounced = True
+            recipient.bounce_reason = str(e)
+            db.commit()
+            print(f"🚨 BOUNCE CAUGHT: Marked {recipient.email} as dead. Reason: {e}")
+        return
+
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to send to {recipient_id}: {str(e)}")

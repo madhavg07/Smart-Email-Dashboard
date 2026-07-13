@@ -90,7 +90,8 @@ async def send_campaign(campaign_id: str, payload: SendRequest = None, db: Sessi
 
     # 2. DEDUPLICATE BY EMAIL ADDRESS
     # Even if the DB has 10 different IDs for "john@gmail.com", we only queue ONE email.
-    recipients = db.query(Recipient).filter(Recipient.id.in_(raw_ids)).all()
+    recipients = db.query(Recipient).filter(Recipient.id.in_(raw_ids), 
+                                            Recipient.is_bounced == False).all()
     seen_emails = set()
     target_ids = []
     

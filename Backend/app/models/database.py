@@ -128,6 +128,8 @@ class Recipient(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("User", back_populates="recipients")
+    is_bounced = Column(Boolean, default=False)
+    bounce_reason = Column(String, nullable=True)
 
 
 class Group(Base):
