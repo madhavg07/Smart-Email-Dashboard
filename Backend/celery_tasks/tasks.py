@@ -24,6 +24,25 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 if REDIS_URL.startswith("redis://") and "upstash" in REDIS_URL:
     REDIS_URL = REDIS_URL.replace("redis://", "rediss://")
 
+# 🚨 MEMOIZATION CACHE: Stores heavy HTML in local RAM
+_campaign_content_cache = {}
+
+def get_cached_campaign_content(db_session, campaign_id):
+    """Fetches the heavy HTML once (O(1)), then serves it from RAM for all future tasks."""
+    if campaign_id not in _campaign_content_cache:
+        # Fetch the full row once to cache the heavy data
+        from app.models.database import Campaign
+        camp = db_session.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if camp:
+            _campaign_content_cache[campaign_id] = {
+                "subject": camp.subject,
+                "body_html": camp.body_html,
+                "subject_b": camp.subject_b,
+                "body_html_b": camp.body_html_b,
+                "is_ab_test": camp.is_ab_test
+            }
+    return _campaign_content_cache.get(campaign_id)
+
 celery_app = Celery("mailpulse", broker=REDIS_URL, backend=REDIS_URL)
 
 celery_app.conf.update(
@@ -117,9 +136,10 @@ def process_campaign_queue(self, campaign_id: str, recipient_ids: list, personal
     finally:
         db.close()
 
+# 🚨 YOUR UPDATED DISPATCH TASK 🚨
 @celery_app.task(bind=True, max_retries=999)
 def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, personalize: bool, idx: int, sender_name: str = None):
-    from app.models.database import SessionLocal, Campaign, Recipient, SendLog, SenderAccount
+    from app.models.database import SessionLocal, Campaign, Recipient, SendLog, SenderAccount, SendQueue
     from app.services.email_service import inject_tracking_pixel, rewrite_links, build_html_email
     from app.services.ai_service import personalize_email
     from app.services.encryption import decrypt_password
@@ -129,39 +149,58 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
     import ssl
     import os
     import uuid
+    import logging
     from datetime import datetime
     import asyncio
     
-
+    logger = logging.getLogger(__name__)
     db = SessionLocal()
+    
     try:
-        campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+        # 🚨 THE BULLETPROOF SHIELD (Idempotency Check) 🚨
+        queue_record = db.query(SendQueue).filter(
+            SendQueue.campaign_id == campaign_id,
+            SendQueue.recipient_id == recipient_id
+        ).first()
 
-        # 1. HANDLE CANCELLED CAMPAIGNS
-        if not campaign or campaign.status == "cancelled":
+        if queue_record and queue_record.status in ['sent', 'completed', 'bounced']:
+            logger.info(f"🛑 Duplicate task caught and destroyed for recipient {recipient_id}")
+            return
+
+        # 1. ONLY fetch the status string (Tiny data transfer!)
+        campaign_status = db.query(Campaign.status).filter(Campaign.id == campaign_id).scalar()
+
+        if not campaign_status or campaign_status == "cancelled":
             logger.info(f"Campaign {campaign_id} cancelled. Dropping email to {recipient_id}.")
-            return # Instantly kills the task
+            if queue_record:
+                queue_record.status = "cancelled"
+                db.commit()
+            return
 
-        # 2. HANDLE PAUSED CAMPAIGNS
-        if campaign.status == "paused":
+        if campaign_status == "paused":
             logger.info(f"Campaign {campaign_id} is paused. Sleeping task for 5 minutes.")
-            # Put the task back to sleep in Redis for 300 seconds, then try again
             raise self.retry(countdown=300)
         
+        # 2. Grab the massive HTML payload from local RAM instead of the database
+        content = get_cached_campaign_content(db, campaign_id)
+        if not content:
+            return 
+
         recipient = db.query(Recipient).filter(Recipient.id == recipient_id).first()
         sender = db.query(SenderAccount).filter(SenderAccount.id == sender_id).first()
 
-        if not campaign or not recipient or not sender or recipient.is_suppressed:
+        if not recipient or not sender or recipient.is_suppressed:
             return
 
+        # 3. Use the cached content for the email setup
         active_variant = "A"
-        active_subject = campaign.subject
-        active_body = campaign.body_html
+        active_subject = content["subject"]
+        active_body = content["body_html"]
 
-        if campaign.is_ab_test and (idx % 2 != 0):
+        if content["is_ab_test"] and (idx % 2 != 0):
             active_variant = "B"
-            active_subject = campaign.subject_b
-            active_body = campaign.body_html_b
+            active_subject = content["subject_b"]
+            active_body = content["body_html_b"]
 
         if personalize and (recipient.role or recipient.industry):
             try:
@@ -219,26 +258,38 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         server.send_message(msg)
         server.quit()
 
-        recipient.total_emails_received = (recipient.total_emails_received or 0) + 1
-        campaign.total_sent = (campaign.total_sent or 0) + 1
-        campaign.sent_at = datetime.utcnow()
+        # 4. Update Campaign Stats WITHOUT downloading the heavy HTML row
+        db.query(Campaign).filter(Campaign.id == campaign_id).update({
+            "total_sent": Campaign.total_sent + 1,
+            "sent_at": datetime.utcnow()
+        })
         
-        if campaign.status == "sending":
-            campaign.status = "sent"
+        if campaign_status == "sending":
+            db.query(Campaign).filter(Campaign.id == campaign_id).update({
+                "status": "sent"
+            })
+        
+        recipient.total_emails_received = (recipient.total_emails_received or 0) + 1
         
         send_log.status = 'sent'
         send_log.sent_at = datetime.utcnow()
 
+        if queue_record:
+            queue_record.status = 'completed'
+
         db.commit()
 
     except smtplib.SMTPRecipientsRefused as e:
-        # 🚨 IMMEDIATE BOUNCE DETECTED: The receiving server rejected the address
         recipient = db.query(Recipient).filter(Recipient.id == recipient_id).first()
         if recipient:
             recipient.is_bounced = True
             recipient.bounce_reason = str(e)
-            db.commit()
-            print(f"🚨 BOUNCE CAUGHT: Marked {recipient.email} as dead. Reason: {e}")
+            
+        if queue_record:
+            queue_record.status = 'bounced'
+            
+        db.commit()
+        logger.info(f"🚨 BOUNCE CAUGHT: Marked {recipient_id} as dead. Reason: {e}")
         return
 
     except Exception as e:
@@ -247,7 +298,7 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         raise self.retry(exc=e, countdown=60)
     finally:
         db.close()
-
+        
 # 1. The Automated Suppression Task
 @celery_app.task(bind=True)
 def auto_suppress_inactive_students(self):
