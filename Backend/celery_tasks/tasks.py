@@ -167,21 +167,17 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
             logger.info(f"🛑 Duplicate task caught and destroyed for recipient {recipient_id}")
             return
 
-        # 1. ONLY fetch the status string (Tiny data transfer!)
         campaign_status = db.query(Campaign.status).filter(Campaign.id == campaign_id).scalar()
 
         if not campaign_status or campaign_status == "cancelled":
-            logger.info(f"Campaign {campaign_id} cancelled. Dropping email to {recipient_id}.")
             if queue_record:
                 queue_record.status = "cancelled"
                 db.commit()
             return
 
         if campaign_status == "paused":
-            logger.info(f"Campaign {campaign_id} is paused. Sleeping task for 5 minutes.")
             raise self.retry(countdown=300)
         
-        # 2. Grab the massive HTML payload from local RAM instead of the database
         content = get_cached_campaign_content(db, campaign_id)
         if not content:
             return 
@@ -192,7 +188,35 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         if not recipient or not sender or recipient.is_suppressed:
             return
 
-        # 3. Use the cached content for the email setup
+        # ---------------------------------------------------------
+        # 🚨 NEW: 10% ROLLING WARM-UP LOGIC
+        # ---------------------------------------------------------
+        today = datetime.utcnow().date()
+        
+        # 1. Reset counters if a new day has started
+        if sender.last_reset.date() != today:
+            sender.sent_today = 0
+            sender.last_reset = datetime.utcnow()
+            db.commit()
+
+        # 2. Check if this account has hit its limit for today
+        if sender.sent_today >= sender.daily_limit:
+            
+            # If we hit the limit, increase tomorrow's limit by 10% (max 400)
+            if sender.daily_limit < sender.max_daily_limit:
+                increase = max(1, int(sender.daily_limit * 0.10)) # 10% growth
+                new_limit = min(sender.max_daily_limit, sender.daily_limit + increase)
+                
+                sender.daily_limit = new_limit
+                sender.limit_reached_at = datetime.utcnow()
+                db.commit()
+                logger.info(f"🎉 Account {sender.email_address} grew by 10%. Next limit is {new_limit}.")
+            
+            logger.warning(f"🛑 Account {sender.email_address} maxed out at {sender.sent_today} emails today. Sleeping.")
+            # Put the Celery task back in the queue to sleep for 24 hours
+            raise self.retry(countdown=86400) 
+        # ---------------------------------------------------------
+
         active_variant = "A"
         active_subject = content["subject"]
         active_body = content["body_html"]
@@ -258,7 +282,7 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         server.send_message(msg)
         server.quit()
 
-        # 4. Update Campaign Stats WITHOUT downloading the heavy HTML row
+        # Update stats
         db.query(Campaign).filter(Campaign.id == campaign_id).update({
             "total_sent": Campaign.total_sent + 1,
             "sent_at": datetime.utcnow()
@@ -270,6 +294,10 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
             })
         
         recipient.total_emails_received = (recipient.total_emails_received or 0) + 1
+        
+        # 🚨 Increment the sender's daily tracking count
+        sender.sent_today += 1
+        sender.last_sent_at = datetime.utcnow()
         
         send_log.status = 'sent'
         send_log.sent_at = datetime.utcnow()
@@ -298,7 +326,7 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
         raise self.retry(exc=e, countdown=60)
     finally:
         db.close()
-        
+      
 # 1. The Automated Suppression Task
 @celery_app.task(bind=True)
 def auto_suppress_inactive_students(self):

@@ -17,18 +17,14 @@ if DATABASE_URL.startswith("postgres://"):
 if "sqlite" in DATABASE_URL.lower():
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
-    # 1. Start with your existing timeout
     connect_args = {"connect_timeout": 30}
-    
-    # 2. Only enforce strict SSL if we are NOT running locally
     if "localhost" not in DATABASE_URL:
         connect_args["sslmode"] = "require"
         
-    # 3. Add the anti-crash pooling settings here
     engine = create_engine(
         DATABASE_URL, 
-        pool_pre_ping=True,  # The magic fix: Tests connection before querying
-        pool_recycle=300,    # Refreshes connections every 5 minutes before Neon kills them
+        pool_pre_ping=True,  
+        pool_recycle=300,    
         connect_args=connect_args
     )
 
@@ -44,6 +40,7 @@ def get_db():
 
 def gen_uuid():
     return str(uuid.uuid4())
+
 class User(Base):
     __tablename__ = "users"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -51,7 +48,6 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    # Relationships
     campaigns = relationship("Campaign", back_populates="owner", cascade="all, delete-orphan")
     recipients = relationship("Recipient", back_populates="owner", cascade="all, delete-orphan")
     groups = relationship("Group", back_populates="owner", cascade="all, delete-orphan")
@@ -70,34 +66,26 @@ class SenderAccount(Base):
     __tablename__ = "sender_accounts"
 
     id = Column(Integer, primary_key=True, index=True)
-    # NOTE: the real DB column is VARCHAR (users.id is a UUID string). The model
-    # previously said Integer, which was wrong-on-paper; aligned to String so
-    # SQLAlchemy binds/compares types correctly. No data migration needed.
     user_id = Column(String, ForeignKey("users.id"))
-
     email_address = Column(String, unique=True)
-    provider = Column(String) # "smtp", "sendgrid", "gmail"
-    credentials = Column(String) # Encrypted password or API key
+    provider = Column(String) 
+    credentials = Column(String) 
     
-    # Rotation & Limit Management
-    daily_limit = Column(Integer, default=400) # Ceiling. Effective limit is min(warmup_schedule(age), daily_limit)
+    # --- AUTOMATED WARM-UP SETTINGS ---
+    daily_limit = Column(Integer, default=30)       # Starts at 30
+    max_daily_limit = Column(Integer, default=400)  # Capped at 400
     sent_today = Column(Integer, default=0)
     last_reset = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
     
-    # --- NEW: Advanced Rolling 24-Hour Limit Tracking ---
     limit_reached_at = Column(DateTime, nullable=True)
     last_sent_at = Column(DateTime, nullable=True)
-    # ----------------------------------------------------
-
-    # Warmup: brand-new Gmail accounts start at 30/day and ramp up based on age.
-    # For already-warmed existing accounts, the migration backdates this ~60 days.
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Campaign(Base):
     __tablename__ = "campaigns"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("users.id"), nullable=False) # The Ownership Link
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
     name = Column(String, nullable=False)
     subject = Column(String, nullable=False)
     body_html = Column(Text, nullable=False)
@@ -106,19 +94,17 @@ class Campaign(Base):
     sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    # A/B Testing Columns
     is_ab_test = Column(Boolean, default=False)
     subject_b = Column(String, nullable=True)
     body_html_b = Column(Text, nullable=True)
-
     owner = relationship("User", back_populates="campaigns")
 
 
 class Recipient(Base):
     __tablename__ = "recipients"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("users.id"), nullable=False) # The Ownership Link
-    email = Column(String, nullable=False) # Removed unique=True so different users can have the same email in their lists
+    user_id = Column(String, ForeignKey("users.id"), nullable=False) 
+    email = Column(String, nullable=False) 
     name = Column(String, nullable=True)
     company = Column(String, nullable=True)
     role = Column(String, nullable=True)
@@ -131,7 +117,6 @@ class Recipient(Base):
     seriousness_score = Column(Float, default=0.0)
     metadata_ = Column("metadata", JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-
     owner = relationship("User", back_populates="recipients")
     is_bounced = Column(Boolean, default=False)
     bounce_reason = Column(String, nullable=True)
@@ -140,11 +125,10 @@ class Recipient(Base):
 class Group(Base):
     __tablename__ = "groups"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("users.id"), nullable=False) # The Ownership Link
+    user_id = Column(String, ForeignKey("users.id"), nullable=False) 
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-
     owner = relationship("User", back_populates="groups")
 
 
@@ -192,29 +176,14 @@ class ClickEvent(Base):
 
 
 class SendQueue(Base):
-    """
-    Durable outbox / send queue. This is the SINGLE SOURCE OF TRUTH for which
-    emails still need to go out. Every recipient of a campaign gets one row here
-    the moment the campaign is sent. The background worker pulls 'pending' rows,
-    sends them, and flips them to 'sent'. If Redis, the worker, or the VM dies,
-    nothing is lost because every pending recipient is safe in Postgres (Neon).
-
-    Statuses:
-      pending  -> waiting to be sent (also where overflow waits for daily reset)
-      sending  -> locked by a worker right now (crash-recovered after a timeout)
-      sent     -> delivered; a SendLog row exists
-      failed   -> exceeded max attempts; needs manual attention
-      skipped  -> recipient suppressed / no longer valid
-    """
     __tablename__ = "send_queue"
-
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     campaign_id = Column(String, ForeignKey("campaigns.id"), nullable=False, index=True)
     recipient_id = Column(String, ForeignKey("recipients.id"), nullable=False, index=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
 
     status = Column(String, default="pending", index=True)
-    variant = Column(String, default="A")            # A/B handled at enqueue time
+    variant = Column(String, default="A") 
     personalize = Column(Boolean, default=True)
     sender_name = Column(String, nullable=True)
 
@@ -223,43 +192,27 @@ class SendQueue(Base):
     max_attempts = Column(Integer, default=5)
     last_error = Column(Text, nullable=True)
 
-    locked_at = Column(DateTime, nullable=True)      # set when status='sending' for crash recovery
-    sender_id = Column(Integer, nullable=True)       # which sender account delivered it
-    send_log_id = Column(String, nullable=True)      # link to the resulting SendLog
+    locked_at = Column(DateTime, nullable=True) 
+    sender_id = Column(Integer, nullable=True) 
+    send_log_id = Column(String, nullable=True) 
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Belt-and-suspenders against duplicate sends: one row per (campaign, recipient).
     __table_args__ = (
         UniqueConstraint("campaign_id", "recipient_id", name="uq_sendqueue_campaign_recipient"),
         Index("ix_sendqueue_status_scheduled", "status", "scheduled_for"),
     )
 
-
 class CampaignContentRevision(Base):
-    """
-    Version history of a campaign's email content.
-
-    A 'auto_ai' revision is created automatically by the worker when a campaign's
-    average recipient engagement stays below the spam-threshold ~2 days after
-    sending: the OLD content is snapshotted here first, then the campaign body is
-    rewritten and the new content is snapshotted too. The campaign detail view
-    shows this whole history alongside the current live content.
-
-    source:
-      original  -> the content as it was before the first auto-optimization
-      auto_ai   -> AI-rewritten because engagement was low (assumed spam-foldered)
-      manual    -> a user edit (optional; reserved for future use)
-    """
     __tablename__ = "campaign_content_revisions"
-
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     campaign_id = Column(String, ForeignKey("campaigns.id"), nullable=False, index=True)
 
     subject = Column(String, nullable=True)
     body_html = Column(Text, nullable=True)
-    source = Column(String, default="auto_ai")       # original | auto_ai | manual
-    reason = Column(String, nullable=True)           # human-readable why
-    avg_engagement = Column(Float, nullable=True)     # avg seriousness_score at change time
+    source = Column(String, default="auto_ai") 
+    reason = Column(String, nullable=True) 
+    avg_engagement = Column(Float, nullable=True) 
     created_at = Column(DateTime, default=datetime.utcnow)
+    
