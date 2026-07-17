@@ -2,27 +2,7 @@
 Email verification service — decides whether an address is likely deliverable
 WITHOUT sending a real email.
 
-Three layers, cheapest first:
-  1. Syntax        -> email_validator (format / RFC checks)
-  2. Domain MX     -> dnspython: does the domain actually have mail servers?
-  3. SMTP mailbox  -> connect to the MX and RCPT TO:<address>, read the reply
-                      code. Catch-all aware (also probes a random mailbox on the
-                      same domain so we don't trust "accept-all" servers).
-
-IMPORTANT (deployment reality): step 3 needs OUTBOUND PORT 25, which most cloud
-hosts (Render, Heroku, many PaaS) BLOCK. Where port 25 is blocked the probe just
-times out and the address comes back as 'unknown' (kept, never dropped) — so on
-Render this effectively degrades to syntax + MX filtering. Run whatever process
-imports the CSV on a machine with port 25 open (e.g. a VM) to get true
-mailbox-level results.
-
-Statuses returned:
-  valid    -> deliverable (MX ok, mailbox accepted, non-catch-all)
-  invalid  -> definitely undeliverable (bad syntax / no MX / hard 5xx reject)
-  unknown  -> couldn't determine (port 25 blocked, greylisted, timeout, catch-all)
-
-Only 'invalid' addresses should be dropped on import. 'unknown' is kept so we
-never delete real Gmail/Outlook users whose servers refuse verification.
+Upgraded with Heuristics, Multiple MX Fallback, and Retry Backoff.
 """
 
 import os
@@ -31,6 +11,7 @@ import string
 import random
 import logging
 import smtplib
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import dns.resolver
@@ -42,17 +23,26 @@ PROBE_FROM = os.getenv("VERIFY_FROM_EMAIL", os.getenv("FROM_EMAIL", "verify@exam
 SMTP_TIMEOUT = int(os.getenv("VERIFY_SMTP_TIMEOUT", "10"))
 DNS_TIMEOUT = float(os.getenv("VERIFY_DNS_TIMEOUT", "5"))
 MAX_WORKERS = int(os.getenv("VERIFY_MAX_WORKERS", "20"))
-# Optional kill-switch: set VERIFY_SMTP_PROBE=0 to skip step 3 entirely
-# (recommended on hosts where port 25 is blocked — saves the timeout wait).
 SMTP_PROBE_ENABLED = os.getenv("VERIFY_SMTP_PROBE", "1") != "0"
+
+# --- NEW: Heuristics Configuration ---
+ROLE_ACCOUNTS = {
+    "admin", "billing", "contact", "customerservice", "enquiries", "help", 
+    "hello", "info", "marketing", "newsletter", "noreply", "press", 
+    "privacy", "sales", "support", "team"
+}
+
+DISPOSABLE_DOMAINS = {
+    "mailinator.com", "10minutemail.com", "guerrillamail.com", "tempmail.com", 
+    "trashmail.com", "yopmail.com", "dispostable.com", "getnada.com"
+}
 
 _resolver = dns.resolver.Resolver()
 _resolver.timeout = DNS_TIMEOUT
 _resolver.lifetime = DNS_TIMEOUT
 
-_mx_cache = {}        # domain -> [mx hosts]  (empty list = no mail server)
+_mx_cache = {}        # domain -> [mx hosts] 
 _catchall_cache = {}  # domain -> bool
-
 
 def _syntax_ok(email: str) -> bool:
     try:
@@ -60,7 +50,6 @@ def _syntax_ok(email: str) -> bool:
         return True
     except EmailNotValidError:
         return False
-
 
 def _get_mx(domain: str):
     if domain in _mx_cache:
@@ -70,7 +59,6 @@ def _get_mx(domain: str):
         answers = _resolver.resolve(domain, "MX")
         hosts = [str(r.exchange).rstrip(".") for r in sorted(answers, key=lambda a: a.preference)]
     except Exception:
-        # Some domains receive mail on their A record with no explicit MX.
         try:
             _resolver.resolve(domain, "A")
             hosts = [domain]
@@ -79,10 +67,8 @@ def _get_mx(domain: str):
     _mx_cache[domain] = hosts
     return hosts
 
-
 def _random_local() -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
-
 
 def _smtp_probe(mx_host: str, domain: str, email: str):
     """Return (status, reason). Detects and caches catch-all domains."""
@@ -94,8 +80,7 @@ def _smtp_probe(mx_host: str, domain: str, email: str):
         server.mail(PROBE_FROM)
         code, _ = server.rcpt(email)
 
-        # Catch-all detection (once per domain): if a random mailbox is also
-        # accepted, the server accepts everything and we can't trust a 250.
+        # Catch-all detection
         if domain not in _catchall_cache:
             rcode, _ = server.rcpt(f"{_random_local()}@{domain}")
             _catchall_cache[domain] = rcode in (250, 251)
@@ -105,12 +90,17 @@ def _smtp_probe(mx_host: str, domain: str, email: str):
             if catch_all:
                 return "unknown", "domain is catch-all (accepts all mailboxes)"
             return "valid", "mailbox accepted"
-        if code in (550, 551, 553, 554, 501):
+        if code in (550, 551, 553, 554, 501, 521): # Added 521 for hard fail
             return "invalid", f"mailbox rejected ({code})"
+        
+        # Soft fails (4xx) - Signal to retry loop
+        if 400 <= code < 500:
+            return "soft_fail", f"server busy/greylisting ({code})"
+            
         return "unknown", f"inconclusive SMTP code {code}"
+        
     except (socket.timeout, smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError, OSError) as e:
-        # Overwhelmingly this is outbound port 25 being blocked by the host.
-        return "unknown", f"probe unavailable ({type(e).__name__})"
+        return "network_error", f"probe unavailable ({type(e).__name__})"
     except Exception as e:
         return "unknown", f"probe error ({e})"
     finally:
@@ -120,22 +110,54 @@ def _smtp_probe(mx_host: str, domain: str, email: str):
             except Exception:
                 pass
 
-
 def verify_email(email: str) -> dict:
-    email = (email or "").strip()
+    email = (email or "").strip().lower()
+    
+    # 1. Syntax Check
     if not email or not _syntax_ok(email):
         return {"email": email, "status": "invalid", "reason": "bad syntax"}
 
-    domain = email.rsplit("@", 1)[-1].lower()
-    mx = _get_mx(domain)
-    if not mx:
+    local_part, domain = email.rsplit("@", 1)
+
+    # 2. Heuristics Check (Instant Fail/Flag)
+    if domain in DISPOSABLE_DOMAINS:
+        return {"email": email, "status": "invalid", "reason": "disposable domain blocked"}
+    if local_part in ROLE_ACCOUNTS:
+        return {"email": email, "status": "risky", "reason": "role-based account"}
+
+    # 3. DNS Check
+    mx_list = _get_mx(domain)
+    if not mx_list:
         return {"email": email, "status": "invalid", "reason": "no MX / domain can't receive mail"}
 
     if not SMTP_PROBE_ENABLED:
         return {"email": email, "status": "unknown", "reason": "SMTP probe disabled; passed syntax+MX"}
 
-    status, reason = _smtp_probe(mx[0], domain, email)
-    return {"email": email, "status": status, "reason": reason}
+    # 4. SMTP Probe with Retries & MX Fallback
+    max_retries = 3
+    backoff_base = 0.5
+    
+    # Try the top 2 MX servers
+    for mx in mx_list[:2]:
+        for attempt in range(1, max_retries + 1):
+            status, reason = _smtp_probe(mx, domain, email)
+            
+            # If successful or definitely invalid, stop immediately
+            if status in ["valid", "invalid", "unknown", "risky"]:
+                return {"email": email, "status": status, "reason": reason}
+            
+            # If server is busy (greylisting), wait and retry
+            if status == "soft_fail" and attempt < max_retries:
+                delay = backoff_base * (2 ** (attempt - 1)) + random.uniform(0, backoff_base)
+                time.sleep(delay)
+                continue
+                
+            # If Port 25 is blocked, don't retry, just return unknown
+            if status == "network_error":
+                return {"email": email, "status": "unknown", "reason": reason}
+
+    # If we exhaust all retries and servers without a hard answer
+    return {"email": email, "status": "unknown", "reason": "exhausted retries on MX servers"}
 
 
 def verify_bulk(emails, max_workers: int = MAX_WORKERS) -> list:
