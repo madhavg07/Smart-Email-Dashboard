@@ -8,7 +8,7 @@ from app.services.auth_services import verify_password, create_access_token, get
 import random
 from datetime import datetime, timedelta
 from app.services.email_service import send_single_email 
-
+from celery_tasks.tasks import send_async_otp
 router = APIRouter()
 
 class VerifyEmailRequest(BaseModel):
@@ -36,13 +36,12 @@ async def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
         verify_otp_expires=expires
     )
     db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    db.flush()
 
     subject = "Verify your MailPulse Account"
     body_html = f"<h2>Welcome to MailPulse!</h2><p>Your verification code is: <strong>{otp}</strong></p><p>This code expires in 15 minutes.</p>"
     
-    email_sent = await send_single_email(
+    email_sent = await send_async_otp.delay(
         to_email=new_user.email, 
         to_name="New User", 
         subject=subject, 
@@ -50,11 +49,13 @@ async def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
     )
 
     if not email_sent:
+        db.rollback()
         raise HTTPException(
             status_code=500, 
             detail="We couldn't send the OTP email. Please try again later."
         )
 
+    db.commit()
     return {"message": "Verification OTP sent"}
 
 

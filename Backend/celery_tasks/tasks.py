@@ -327,6 +327,35 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
     finally:
         db.close()
       
+@celery_app.task(bind=True, max_retries=3)
+def send_async_otp(self, to_email: str, to_name: str, otp_code: str):
+    """Background task to send OTP emails via Azure Celery Worker."""
+    # Import inside the task to prevent circular dependency issues
+    from app.services.email_service import send_single_email
+    
+    try:
+        # Run the async email function inside the synchronous celery worker
+        success = asyncio.run(
+            send_single_email(
+                to_email=to_email,
+                to_name=to_name,
+                subject="Your Smart Email Dashboard OTP",
+                html_body=f"<h2>Your registration OTP is: {otp_code}</h2><p>This code will expire in 10 minutes.</p>",
+                text_body=f"Your registration OTP is: {otp_code}"
+            )
+        )
+        
+        if not success:
+            raise Exception("SMTP relay failed.")
+            
+        logger.info(f"Successfully sent async OTP to {to_email}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to send async OTP to {to_email}: {str(e)}")
+        # Retry the email up to 3 times, waiting 30 seconds between tries if Gmail is busy
+        raise self.retry(exc=e, countdown=30)
+
 # 1. The Automated Suppression Task
 @celery_app.task(bind=True)
 def auto_suppress_inactive_students(self):
