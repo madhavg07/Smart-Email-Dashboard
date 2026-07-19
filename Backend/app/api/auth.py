@@ -17,17 +17,20 @@ class VerifyEmailRequest(BaseModel):
 class UserRegister(BaseModel):
     email: str
     password: str
+
 @router.post("/register")
 async def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
+    # 1. Check if user already exists
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    # 2. Hash password and prepare OTP metadata
     hashed_password = get_password_hash(user_data.password)
-    
     otp = str(random.randint(100000, 999999))
     expires = datetime.utcnow() + timedelta(minutes=15)
 
+    # 3. Stage the user creation without a final commit
     new_user = User(
         email=user_data.email, 
         hashed_password=hashed_password,
@@ -36,25 +39,25 @@ async def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
         verify_otp_expires=expires
     )
     db.add(new_user)
-    db.flush()
+    db.flush()  # Allocates ID/state but allows a rollback if Celery or Redis breaks
 
-    subject = "Verify your MailPulse Account"
-    body_html = f"<h2>Welcome to MailPulse!</h2><p>Your verification code is: <strong>{otp}</strong></p><p>This code expires in 15 minutes.</p>"
-    
-    email_sent = await send_async_otp.delay(
-        to_email=new_user.email, 
-        to_name="New User", 
-        subject=subject, 
-        html_body=body_html
-    )
-
-    if not email_sent:
+    # 4. Dispatch task to the Azure Celery worker via Redis
+    try:
+        # Pass exactly the 3 positional arguments the Celery task signature expects
+        send_async_otp.delay(
+            to_email=new_user.email, 
+            to_name="New User", 
+            otp_code=otp
+        )
+    except Exception as e:
+        # If the Redis broker is offline or drops the task payload, clean up the database
         db.rollback()
         raise HTTPException(
             status_code=500, 
-            detail="We couldn't send the OTP email. Please try again later."
+            detail="Message broker unavailable. Could not queue verification OTP."
         )
 
+    # 5. Commit the user permanently only after successful queue injection
     db.commit()
     return {"message": "Verification OTP sent"}
 
