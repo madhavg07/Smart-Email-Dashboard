@@ -43,7 +43,8 @@ def get_cached_campaign_content(db_session, campaign_id):
             }
     return _campaign_content_cache.get(campaign_id)
 
-celery_app = Celery("mailpulse", broker=REDIS_URL, backend=REDIS_URL)
+celery_app = Celery("mailpulse", broker=REDIS_URL, backend=REDIS_URL, 
+                    include=["celery_tasks.tasks"])
 
 celery_app.conf.update(
     task_serializer="json",
