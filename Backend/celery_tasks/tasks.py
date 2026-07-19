@@ -328,7 +328,7 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
     finally:
         db.close()
       
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, name="celery_tasks.tasks.send_async_otp")
 def send_async_otp(self, to_email: str, to_name: str, otp_code: str):
     """Background task to send OTP emails via Azure Celery Worker."""
     # Import inside the task to prevent circular dependency issues
