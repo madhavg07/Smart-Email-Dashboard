@@ -42,12 +42,18 @@ async def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
     subject = "Verify your MailPulse Account"
     body_html = f"<h2>Welcome to MailPulse!</h2><p>Your verification code is: <strong>{otp}</strong></p><p>This code expires in 15 minutes.</p>"
     
-    await send_single_email(
+    email_sent = await send_single_email(
         to_email=new_user.email, 
         to_name="New User", 
         subject=subject, 
         html_body=body_html
     )
+
+    if not email_sent:
+        raise HTTPException(
+            status_code=500, 
+            detail="We couldn't send the OTP email. Please try again later."
+        )
 
     return {"message": "Verification OTP sent"}
 
@@ -125,12 +131,18 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
     body_html = f"<h2>Password Reset</h2><p>Your One-Time Password (OTP) is: <strong>{otp}</strong></p><p>This code expires in 15 minutes.</p>"
     
     # Using your existing email function
-    await send_single_email(
+    email_sent=await send_single_email(
         to_email=user.email, 
         to_name="User", 
         subject=subject, 
         html_body=body_html
     )
+
+    if not email_sent:
+        raise HTTPException(
+            status_code=500, 
+            detail="We couldn't send the OTP email. Please try again later."
+        )
 
     return {"message": "If that email exists, an OTP has been sent."}
 
