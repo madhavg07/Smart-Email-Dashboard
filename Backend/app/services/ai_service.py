@@ -84,29 +84,46 @@ async def _call_openai(prompt: str, system: str) -> str:
         
     messages.append({"role": "user", "content": prompt})
 
+    # 1. Define a list of models to try in order
+    models_to_try = [
+        "mixtral-8x7b-32768",
+        "llama3-70b-8192",  # Another older stable model
+        "gemma2-9b-it"      # Google's open model, usually available on Groq
+    ]
+
     async with httpx.AsyncClient(timeout=30) as client:
-        # Retries for BOTH Rate Limits (429) AND Server Overloads (500, 502, 503)
-        for attempt in range(4):
-            resp = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                json={"model": "llama3-8b-8192", "messages": messages, "max_tokens": 3000,"response_format": {"type": "json_object"}},
-            )
-            
-            if resp.status_code in [429, 500, 502, 503, 529]:
-                wait_time = float(resp.headers.get("Retry-After", 2 ** (attempt + 1)))
-                logger.warning(f"Groq API Overloaded/Rate Limited (HTTP {resp.status_code}). Retrying in {wait_time}s...")
-                await asyncio.sleep(wait_time)
-                continue
-                
-            if resp.status_code != 200:
-                raise ValueError(f"Groq API Error: {resp.text}")
-                
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
-            
-        raise ValueError("Groq API failed after 3 retries. The servers are currently too busy.")
+        for model_name in models_to_try:
+             # Retries for BOTH Rate Limits (429) AND Server Overloads (500, 502, 503)
+            for attempt in range(4):
+                try:
+                    resp = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                        json={"model": model_name, "messages": messages, "max_tokens": 3000,"response_format": {"type": "json_object"}},
+                    )
+                    
+                    if resp.status_code in [429, 500, 502, 503, 529]:
+                        wait_time = float(resp.headers.get("Retry-After", 2 ** (attempt + 1)))
+                        logger.warning(f"Groq API Overloaded/Rate Limited (HTTP {resp.status_code}). Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                        
+                    # If it's a 400 or 404 (model missing/decommissioned), catch it and move to the next model
+                    resp.raise_for_status()
+                    
+                    data = resp.json()
+                    return data["choices"][0]["message"]["content"]
+                    
+                except httpx.HTTPStatusError as e:
+                    # Break the retry loop for this specific model, move to the next model in models_to_try
+                    logger.warning(f"Groq model {model_name} failed: {e.response.text}")
+                    break 
+                except Exception as e:
+                    logger.error(f"Unexpected Groq error with {model_name}: {str(e)}")
+                    break
+        
+        raise ValueError("All Groq fallback models failed or servers are too busy.")
+
 import re
 
 def ensure_html_links(text: str) -> str:
