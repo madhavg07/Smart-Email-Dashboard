@@ -86,9 +86,9 @@ async def _call_openai(prompt: str, system: str) -> str:
 
     # 1. Define a list of models to try in order
     models_to_try = [
-        "mixtral-8x7b-32768",
-        "llama3-70b-8192",  # Another older stable model
-        "gemma2-9b-it"      # Google's open model, usually available on Groq
+        "qwen/qwen3.6-27b",       # Strong, highly capable open-weight model
+        "openai/gpt-oss-120b",    # Massive fallback model
+        "groq/compound"           # Groq's native general-purpose model
     ]
 
     async with httpx.AsyncClient(timeout=30) as client:
