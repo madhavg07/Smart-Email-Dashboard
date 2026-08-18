@@ -90,7 +90,7 @@ async def _call_openai(prompt: str, system: str) -> str:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                json={"model": "llama-3.1-8b-instant", "messages": messages, "max_tokens": 3000,"response_format": {"type": "json_object"}},
+                json={"model": "llama3-8b-8192", "messages": messages, "max_tokens": 3000,"response_format": {"type": "json_object"}},
             )
             
             if resp.status_code in [429, 500, 502, 503, 529]:
