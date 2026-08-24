@@ -52,6 +52,7 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    task_ignore_result=True,
     # broker_use_ssl={'ssl_cert_reqs': ssl.CERT_NONE},
     # redis_backend_use_ssl={'ssl_cert_reqs': ssl.CERT_NONE},
     broker_connection_retry_on_startup=True,
