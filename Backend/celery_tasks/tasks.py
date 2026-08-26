@@ -290,10 +290,10 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
             "sent_at": datetime.utcnow()
         })
         
-        if campaign_status == "sending":
-            db.query(Campaign).filter(Campaign.id == campaign_id).update({
-                "status": "sent"
-            })
+        db.query(Campaign).filter(Campaign.id == campaign_id).update({
+            "total_sent": Campaign.total_sent + 1,
+            "sent_at": datetime.utcnow()
+        })
         
         recipient.total_emails_received = (recipient.total_emails_received or 0) + 1
         
