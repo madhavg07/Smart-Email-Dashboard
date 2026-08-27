@@ -157,8 +157,28 @@ def dispatch_email(self, sender_id: int, recipient_id: int, campaign_id: str, pe
     
     logger = logging.getLogger(__name__)
     db = SessionLocal()
+
+    db = SessionLocal()
     
     try:
+        # 🚨 NEW: The Idempotency Lock
+        # Check if this exact person already has a SendLog for this campaign
+        already_sent = db.query(SendLog).filter(
+            SendLog.campaign_id == campaign_id,
+            SendLog.recipient_id == recipient_id
+        ).first()
+
+        if already_sent:
+            print(f"🛡️ Duplicate prevented for Recipient: {recipient_id}. Skipping.")
+            
+            # Also ensure their SendQueue status is marked completed so they don't get stuck
+            db.query(SendQueue).filter(
+                SendQueue.campaign_id == campaign_id,
+                SendQueue.recipient_id == recipient_id
+            ).update({"status": "completed"})
+            db.commit()
+            return "Duplicate prevented"
+                    
         # 🚨 THE BULLETPROOF SHIELD (Idempotency Check) 🚨
         queue_record = db.query(SendQueue).filter(
             SendQueue.campaign_id == campaign_id,
